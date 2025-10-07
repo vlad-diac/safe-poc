@@ -1,0 +1,17 @@
+# Advanced Crawler Dependencies
+# These libraries provide intelligent, adaptive web crawling for multiple site types
+
+# Crawlee - Modern web crawling framework with automatic retries, rate limiting
+crawlee[beautifulsoup]>=0.3.0
+
+# Trafilatura - Universal content extraction that works on ANY website
+trafilatura>=1.12.0
+
+# Additional parsers
+lxml>=4.9.0
+beautifulsoup4>=4.12.0
+
+# For JavaScript-rendered sites (optional)
+# Uncomment if you need to crawl JS-heavy sites:
+# crawlee[playwright]>=0.3.0
+# playwright>=1.40.0
