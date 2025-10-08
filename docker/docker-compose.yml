@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: safe-management-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-safeadmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-safepassword}
+      POSTGRES_DB: ${POSTGRES_DB:-safe_management}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-safeadmin}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Uncomment this if you want to run the backend in Docker as well
+  # backend:
+  #   build:
+  #     context: ../safe-management-app/backend
+  #     dockerfile: Dockerfile
+  #   container_name: safe-management-backend
+  #   restart: unless-stopped
+  #   environment:
+  #     DATABASE_URL: postgresql://${POSTGRES_USER:-safeadmin}:${POSTGRES_PASSWORD:-safepassword}@postgres:5432/${POSTGRES_DB:-safe_management}
+  #     PORT: 5000
+  #     NODE_ENV: development
+  #   ports:
+  #     - "5000:5000"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ../safe-management-app/backend:/app
+  #     - /app/node_modules
+
+volumes:
+  postgres_data:
+    driver: local

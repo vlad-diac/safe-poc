@@ -1,0 +1,2 @@
+# This folder can contain SQL scripts that will run when the database is first initialized
+# Example: create additional databases, users, or initial data

@@ -3,3 +3,15 @@ venv/
 data/output/basic
 data/output/recursive-version
 __pycache__/
+
+# Safe Management App
+safe-management-app/node_modules/
+safe-management-app/backend/.env
+safe-management-app/frontend/.env.local
+safe-management-app/backend/dist/
+safe-management-app/frontend/.next/
+safe-management-app/frontend/out/
+
+# Docker
+docker/.env
+docker/init-scripts/*.sql

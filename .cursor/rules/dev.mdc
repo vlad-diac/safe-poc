@@ -1,0 +1,7 @@
+---
+alwaysApply: true
+---
+
+- only create description markdown files on request!
+- always use the docs from the output/new1 folder for safe documentation
+- always use the safe sdk built in utilities when possible
