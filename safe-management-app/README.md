@@ -148,10 +148,168 @@ safe-management-app/
 ### Prerequisites
 
 - Node.js 18+ installed
-- PostgreSQL running (or use SQLite for development)
+- **PostgreSQL running** (see [Docker Setup](#-docker-setup-recommended) below) or SQLite for development
 - MetaMask browser extension
 - Safe wallet address (create one at [app.safe.global](https://app.safe.global))
 - **RPC Provider Account** (Alchemy, Infura, or similar) - See explanation below ⬇️
+
+---
+
+## 🐳 Docker Setup (Recommended)
+
+The easiest way to get PostgreSQL running is using Docker. We provide a ready-to-use Docker Compose setup.
+
+### Prerequisites for Docker
+
+- [Docker](https://www.docker.com/get-started) installed
+- [Docker Compose](https://docs.docker.com/compose/install/) installed (usually comes with Docker Desktop)
+
+### Quick Start with Docker
+
+**1. Start PostgreSQL Container:**
+
+```bash
+# On Windows:
+cd docker
+start.bat
+
+# On Linux/Mac:
+cd docker
+chmod +x start.sh
+./start.sh
+
+# Or use Docker Compose directly:
+cd docker
+docker-compose up -d
+```
+
+**2. Verify PostgreSQL is Running:**
+
+```bash
+cd docker
+docker-compose ps
+```
+
+You should see `safe-management-postgres` with status "Up" and "healthy".
+
+**3. Configure Backend:**
+
+The Docker setup creates a PostgreSQL database with these credentials:
+- **Host**: `localhost`
+- **Port**: `5432`
+- **Database**: `safe_management`
+- **User**: `safeadmin`
+- **Password**: `safepassword`
+
+Your backend `.env` should already have the correct `DATABASE_URL`:
+```env
+DATABASE_URL="postgresql://safeadmin:safepassword@localhost:5432/safe_management"
+```
+
+**4. Continue with Backend Setup:**
+
+Now follow the [Backend Setup](#2-backend-setup) instructions below.
+
+### Docker Management Commands
+
+#### View PostgreSQL Logs
+```bash
+cd docker
+docker-compose logs -f postgres
+```
+
+#### Stop PostgreSQL
+```bash
+# On Windows:
+cd docker
+stop.bat
+
+# On Linux/Mac:
+cd docker
+./stop.sh
+
+# Or:
+cd docker
+docker-compose down
+```
+
+#### Stop and Delete All Data
+```bash
+cd docker
+docker-compose down -v  # ⚠️ This deletes all database data!
+```
+
+#### Access PostgreSQL CLI
+```bash
+docker exec -it safe-management-postgres psql -U safeadmin -d safe_management
+```
+
+#### Backup Database
+```bash
+docker exec safe-management-postgres pg_dump -U safeadmin safe_management > backup.sql
+```
+
+#### Restore Database
+```bash
+docker exec -i safe-management-postgres psql -U safeadmin -d safe_management < backup.sql
+```
+
+### Docker Troubleshooting
+
+#### "Port 5432 already in use"
+Change the port in `docker/.env`:
+```env
+POSTGRES_PORT=5433
+```
+
+Then update your backend `DATABASE_URL` in `safe-management-app/backend/.env`:
+```env
+DATABASE_URL="postgresql://safeadmin:safepassword@localhost:5433/safe_management"
+```
+
+Restart Docker:
+```bash
+cd docker
+docker-compose down
+docker-compose up -d
+```
+
+#### "Connection refused"
+1. Check if container is running: `docker-compose ps`
+2. Wait 10-20 seconds for PostgreSQL to initialize
+3. Check logs: `docker-compose logs postgres`
+4. Verify the container is "healthy" (not just "running")
+
+#### "Database does not exist"
+The database is automatically created by Docker. If you're having issues:
+```bash
+cd docker
+docker-compose down -v
+docker-compose up -d
+# Wait for container to be healthy
+cd ../safe-management-app/backend
+npx prisma migrate deploy
+```
+
+### Docker Configuration
+
+You can customize the Docker setup by creating a `docker/.env` file:
+
+```env
+# PostgreSQL Configuration
+POSTGRES_USER=safeadmin
+POSTGRES_PASSWORD=safepassword
+POSTGRES_DB=safe_management
+POSTGRES_PORT=5432
+```
+
+> 💡 **Tip**: If you modify `docker/.env`, remember to update the `DATABASE_URL` in your backend `.env` file to match!
+
+### 📚 Detailed Docker Documentation
+
+For more information about the Docker setup, see:
+- [`docker/README.md`](../docker/README.md) - Detailed Docker documentation
+- [`docker/QUICK_START.md`](../docker/QUICK_START.md) - Quick start guide
 
 ---
 
@@ -245,13 +403,49 @@ The app will use the RPC URL you configure in your session settings.
 
 ---
 
+### Quick Installation Summary
+
+Here's the complete setup flow using Docker (recommended):
+
+1. **Start PostgreSQL**: `cd docker && docker-compose up -d`
+2. **Setup Backend**: `cd backend && npm install && npx prisma migrate deploy && npx prisma generate`
+3. **Configure Backend**: Edit `backend/.env` with your RPC URL and Safe address
+4. **Start Backend**: `npm run dev` (in backend folder)
+5. **Setup Frontend**: `cd frontend && npm install`
+6. **Configure Frontend**: Copy `frontend/.env.local.example` to `.env.local`
+7. **Start Frontend**: `npm run dev` (in frontend folder)
+8. **Access App**: Open `http://localhost:3000`
+
+> 💡 **First time?** Follow the detailed steps below for complete instructions.
+
+---
+
 ### 1. Clone & Setup
 
 ```bash
 cd safe-management-app
 ```
 
-### 2. Backend Setup
+### 2. Start PostgreSQL with Docker (Recommended)
+
+Before setting up the backend, start PostgreSQL using Docker:
+
+```bash
+# From the project root
+cd docker
+docker-compose up -d
+
+# Verify it's running
+docker-compose ps
+```
+
+✅ PostgreSQL should show as "Up" and "healthy".
+
+> 📖 See the [Docker Setup](#-docker-setup-recommended) section above for detailed instructions and troubleshooting.
+
+**Alternative:** If you prefer to install PostgreSQL manually, see the [Database Setup](#️-database-setup) section below.
+
+### 3. Backend Setup
 
 ```bash
 cd backend
@@ -275,7 +469,7 @@ Backend will run on `http://localhost:5000`
 
 > **Note**: The initial database migration is included in the repository. If you need to modify the schema later, use `npx prisma migrate dev --name your_change_description` to create a new migration.
 
-### 3. Frontend Setup
+### 4. Frontend Setup
 
 ```bash
 cd ../frontend
@@ -293,7 +487,7 @@ npm run dev
 
 Frontend will run on `http://localhost:3000`
 
-### 4. Access the App
+### 5. Access the App
 
 Open `http://localhost:3000` in your browser. You'll be redirected to `/safe` where you can:
 1. Connect your MetaMask wallet
