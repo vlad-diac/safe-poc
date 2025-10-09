@@ -23,6 +23,8 @@ interface SafeSession {
   rpcUrl: string;
   transactionServiceUrl: string;
   isDefault: boolean;
+  connectedWallet: string | null;
+  autoReconnect: boolean;
 }
 
 interface SafeProviderWrapperProps {
@@ -32,8 +34,12 @@ interface SafeProviderWrapperProps {
 
 interface SessionContextType {
   session: SafeSession | null;
+  connectedWallet: string | null;
+  isConnecting: boolean;
   switchSession: (sessionId: string) => Promise<void>;
   refreshSession: () => Promise<void>;
+  connectWallet: (walletAddress: string, autoReconnect?: boolean) => Promise<void>;
+  disconnectWallet: () => Promise<void>;
 }
 
 // Chain mapping for viem chains
@@ -62,6 +68,8 @@ export function SafeProviderWrapper({ children, sessionId: initialSessionId }: S
   const [loading, setLoading] = useState(true);
   const [config, setConfig] = useState<any>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(initialSessionId);
+  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   const fetchSession = async (sessionIdToFetch?: string) => {
     try {
@@ -97,6 +105,9 @@ export function SafeProviderWrapper({ children, sessionId: initialSessionId }: S
       
       const data = await response.json();
       setSession(data);
+      
+      // Set connected wallet from session
+      setConnectedWallet(data.connectedWallet || null);
       
       // Save the loaded session ID to localStorage
       if (typeof window !== 'undefined') {
@@ -175,6 +186,67 @@ export function SafeProviderWrapper({ children, sessionId: initialSessionId }: S
     await fetchSession(currentSessionId);
   };
 
+  const connectWallet = async (walletAddress: string, autoReconnect?: boolean) => {
+    if (!session) {
+      throw new Error('No active session');
+    }
+    
+    try {
+      setIsConnecting(true);
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      
+      // Save wallet address and autoReconnect preference to session
+      const response = await fetch(`${apiUrl}/api/sessions/${session.id}/connected-wallet`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          walletAddress,
+          autoReconnect: autoReconnect !== undefined ? autoReconnect : session.autoReconnect
+        })
+      });
+      
+      if (!response.ok) throw new Error('Failed to save wallet');
+      
+      const updatedSession = await response.json();
+      setSession(updatedSession);
+      setConnectedWallet(walletAddress);
+      console.log('💾 Connected wallet to session:', walletAddress, 'Auto-reconnect:', updatedSession.autoReconnect);
+    } catch (error) {
+      console.error('Failed to connect wallet:', error);
+      throw error;
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const disconnectWallet = async () => {
+    if (!session) {
+      throw new Error('No active session');
+    }
+    
+    try {
+      setIsConnecting(true);
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      
+      // Clear wallet address from session
+      const response = await fetch(`${apiUrl}/api/sessions/${session.id}/connected-wallet`, {
+        method: 'DELETE'
+      });
+      
+      if (!response.ok) throw new Error('Failed to clear wallet');
+      
+      const updatedSession = await response.json();
+      setSession(updatedSession);
+      setConnectedWallet(null);
+      console.log('🗑️ Disconnected wallet from session');
+    } catch (error) {
+      console.error('Failed to disconnect wallet:', error);
+      throw error;
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
   useEffect(() => {
     fetchSession(currentSessionId);
   }, []);
@@ -214,8 +286,12 @@ export function SafeProviderWrapper({ children, sessionId: initialSessionId }: S
 
   const sessionContextValue: SessionContextType = {
     session,
+    connectedWallet,
+    isConnecting,
     switchSession,
     refreshSession,
+    connectWallet,
+    disconnectWallet,
   };
 
   return (

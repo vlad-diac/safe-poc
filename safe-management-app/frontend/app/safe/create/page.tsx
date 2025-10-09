@@ -22,9 +22,31 @@ export default function CreateTransactionPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
+  const [checkingOwnership, setCheckingOwnership] = useState(true);
 
   // Get Safe connection status
-  const { isSignerConnected, isOwnerConnected } = useSafe();
+  const { isSignerConnected, isOwnerConnected, getSignerAddress } = useSafe();
+
+  // Debug ownership status and set loading state
+  useEffect(() => {
+    console.log('🔍 Create Transaction Page - Connection Status:', {
+      isSignerConnected,
+      isOwnerConnected,
+      signerAddress: isSignerConnected ? 'connected' : 'not connected'
+    });
+
+    // If signer is connected, give SDK time to verify ownership
+    if (isSignerConnected) {
+      const timer = setTimeout(() => {
+        setCheckingOwnership(false);
+        console.log('✅ Ownership check complete:', { isOwnerConnected });
+      }, 1500); // Wait 1.5 seconds for ownership verification
+      
+      return () => clearTimeout(timer);
+    } else {
+      setCheckingOwnership(false);
+    }
+  }, [isSignerConnected, isOwnerConnected]);
 
   // Use the Safe SDK hook for sending transactions
   const { sendTransaction, data: txData, isPending, isSuccess, error: txError } = useSendTransaction();
@@ -152,7 +174,7 @@ export default function CreateTransactionPage() {
       </div>
 
       {/* Connection Status Alerts */}
-      {!isSignerConnected && (
+      {!isSignerConnected && !checkingOwnership && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
@@ -162,7 +184,17 @@ export default function CreateTransactionPage() {
         </Alert>
       )}
 
-      {isSignerConnected && !isOwnerConnected && (
+      {isSignerConnected && checkingOwnership && (
+        <Alert>
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <AlertDescription>
+            <strong>Verifying Ownership...</strong>
+            <p className="mt-1">Checking if your wallet is an owner of this Safe.</p>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {isSignerConnected && !checkingOwnership && !isOwnerConnected && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>

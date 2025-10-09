@@ -16,6 +16,8 @@ model SafeSession {
   rpcUrl                String
   transactionServiceUrl String
   isDefault             Boolean  @default(false)
+  connectedWallet       String?  // Auto-connect this wallet when session loads
+  autoReconnect         Boolean  @default(false) // Enable/disable auto-reconnect
   userId                String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
