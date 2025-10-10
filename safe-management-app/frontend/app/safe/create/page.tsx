@@ -23,6 +23,7 @@ export default function CreateTransactionPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
+  const [checkingOwnership, setCheckingOwnership] = useState(true);
 
   // Get Safe context
   const { safeClient, connectedWallet, isOwner } = useSafe();

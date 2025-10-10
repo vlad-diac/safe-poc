@@ -40,6 +40,7 @@ export function WalletConnect() {
   const [copied, setCopied] = useState(false);
   const [networkMismatch, setNetworkMismatch] = useState(false);
   const [walletChainId, setWalletChainId] = useState<number | null>(null);
+  const [autoReconnectChecked, setAutoReconnectChecked] = useState(false);
   
   const expectedChainId = session?.chainId;
 
@@ -177,6 +178,8 @@ export function WalletConnect() {
           setTimeout(() => {
             if (!isOwner) {
               toast.warning('Connected wallet is not a Safe owner. You can view but not sign transactions.');
+            } else {
+              console.log('✅ Verified: Connected wallet is a Safe owner');
             }
           }, 1000);
         }
@@ -192,7 +195,10 @@ export function WalletConnect() {
     try {
       // Disconnect from SafeClient
       await disconnect();
-      setAddress(null);
+      
+      // Clear wallet address from session (global state)
+      await disconnectWallet();
+      
       setNetworkMismatch(false);
       toast.success('Wallet disconnected');
     } catch (error: any) {
@@ -201,10 +207,10 @@ export function WalletConnect() {
   };
 
   const copyAddress = async () => {
-    if (!address) return;
+    if (!connectedWallet) return;
     
     try {
-      await navigator.clipboard.writeText(address);
+      await navigator.clipboard.writeText(connectedWallet);
       setCopied(true);
       toast.success('Address copied to clipboard');
       setTimeout(() => setCopied(false), 2000);
@@ -217,12 +223,34 @@ export function WalletConnect() {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   };
 
-  if (!address) {
+  // Show loading state during connection
+  if (isConnecting) {
     return (
-      <Button onClick={handleConnect} variant="default">
-        <Wallet className="mr-2 h-4 w-4" />
-        Connect Wallet
+      <Button variant="default" disabled>
+        <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-background border-t-transparent" />
+        Connecting...
       </Button>
+    );
+  }
+
+  // Show connect button with auto-reconnect checkbox if no wallet connected
+  if (!connectedWallet) {
+    return (
+      <div className="flex items-center gap-3">
+        <label className="flex items-center gap-2 cursor-pointer text-sm">
+          <input
+            type="checkbox"
+            checked={autoReconnectChecked}
+            onChange={(e) => setAutoReconnectChecked(e.target.checked)}
+            className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+          />
+          <span className="select-none">Auto-reconnect</span>
+        </label>
+        <Button onClick={handleConnect} variant="default">
+          <Wallet className="mr-2 h-4 w-4" />
+          Connect Wallet
+        </Button>
+      </div>
     );
   }
 
@@ -242,7 +270,7 @@ export function WalletConnect() {
           <Button variant="outline" className="gap-2">
             <Avatar className="h-6 w-6">
               <AvatarFallback className="text-xs">
-                {address.slice(2, 4).toUpperCase()}
+                {connectedWallet.slice(2, 4).toUpperCase()}
               </AvatarFallback>
             </Avatar>
             <span className="font-mono text-sm">{truncateAddress(connectedWallet)}</span>
@@ -255,7 +283,7 @@ export function WalletConnect() {
           <DropdownMenuLabel>
             <div className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">Connected Wallet</span>
-              <code className="text-xs font-mono">{truncateAddress(address)}</code>
+              <code className="text-xs font-mono">{truncateAddress(connectedWallet)}</code>
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -303,6 +331,32 @@ export function WalletConnect() {
               Switch to {session?.chainId === 1 ? 'Mainnet' : `Chain ${session?.chainId}`}
             </DropdownMenuItem>
           )}
+          
+          <DropdownMenuSeparator />
+          
+          <div className="px-2 py-2">
+            <label className="flex items-center gap-2 cursor-pointer text-sm">
+              <input
+                type="checkbox"
+                checked={autoReconnectChecked}
+                onChange={async (e) => {
+                  const newValue = e.target.checked;
+                  setAutoReconnectChecked(newValue);
+                  try {
+                    // Update the preference immediately
+                    await connectWallet(connectedWallet, newValue);
+                    toast.success(`Auto-reconnect ${newValue ? 'enabled' : 'disabled'}`);
+                  } catch (error) {
+                    toast.error('Failed to update auto-reconnect preference');
+                    // Revert on error
+                    setAutoReconnectChecked(!newValue);
+                  }
+                }}
+                className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+              />
+              <span className="select-none">Auto-reconnect on page load</span>
+            </label>
+          </div>
           
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleDisconnect} className="text-destructive">

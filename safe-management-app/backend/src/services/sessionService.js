@@ -112,6 +112,26 @@ async function setDefaultSession(id) {
   });
 }
 
+// Update connected wallet for a session
+async function updateConnectedWallet(id, walletAddress, autoReconnect = null) {
+  const updateData = { connectedWallet: walletAddress };
+  
+  // If autoReconnect is explicitly provided, update it
+  if (autoReconnect !== null) {
+    updateData.autoReconnect = autoReconnect;
+  }
+  
+  // If disconnecting (walletAddress is null), disable autoReconnect
+  if (walletAddress === null) {
+    updateData.autoReconnect = false;
+  }
+  
+  return await prisma.safeSession.update({
+    where: { id },
+    data: updateData
+  });
+}
+
 // Delete a session
 async function deleteSession(id) {
   return await prisma.safeSession.delete({
@@ -171,6 +191,7 @@ module.exports = {
   createSession,
   updateSession,
   setDefaultSession,
+  updateConnectedWallet,
   deleteSession,
   generateSessionName,
   createDefaultSessionFromEnv

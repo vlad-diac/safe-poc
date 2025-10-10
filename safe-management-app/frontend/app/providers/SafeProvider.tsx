@@ -21,6 +21,8 @@ interface SafeSession {
   rpcUrl: string;
   transactionServiceUrl: string;
   isDefault: boolean;
+  connectedWallet: string | null;
+  autoReconnect: boolean;
 }
 
 interface SafeProviderWrapperProps {
@@ -38,6 +40,8 @@ interface SafeContextType {
   disconnect: () => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   refreshSession: () => Promise<void>;
+  connectWallet: (walletAddress: string, autoReconnect?: boolean) => Promise<void>;
+  disconnectWallet: () => Promise<void>;
 }
 
 // Chain mapping for viem chains
@@ -113,6 +117,9 @@ export function SafeProviderWrapper({ children, sessionId: initialSessionId }: S
       
       const data = await response.json();
       setSession(data);
+      
+      // Set connected wallet from session
+      setConnectedWallet(data.connectedWallet || null);
       
       // Save the loaded session ID to localStorage
       if (typeof window !== 'undefined') {
@@ -359,6 +366,8 @@ export function SafeProviderWrapper({ children, sessionId: initialSessionId }: S
     disconnect,
     switchSession,
     refreshSession,
+    connectWallet,
+    disconnectWallet,
   };
 
   return (

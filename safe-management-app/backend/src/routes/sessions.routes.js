@@ -144,6 +144,44 @@ router.patch('/:id/set-default', async (req, res) => {
   }
 });
 
+// Update connected wallet for session
+router.patch('/:id/connected-wallet', async (req, res) => {
+  try {
+    const { walletAddress, autoReconnect } = req.body;
+    
+    if (!walletAddress) {
+      return res.status(400).json({
+        error: 'walletAddress is required'
+      });
+    }
+    
+    const session = await sessionService.updateConnectedWallet(
+      req.params.id, 
+      walletAddress,
+      autoReconnect
+    );
+    res.json(session);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to update connected wallet',
+      details: error.message
+    });
+  }
+});
+
+// Clear connected wallet for session
+router.delete('/:id/connected-wallet', async (req, res) => {
+  try {
+    const session = await sessionService.updateConnectedWallet(req.params.id, null);
+    res.json(session);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to clear connected wallet',
+      details: error.message
+    });
+  }
+});
+
 // Delete session
 router.delete('/:id', async (req, res) => {
   try {
