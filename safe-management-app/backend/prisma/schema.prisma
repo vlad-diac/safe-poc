@@ -16,11 +16,18 @@ model SafeSession {
   rpcUrl                String
   transactionServiceUrl String
   isDefault             Boolean  @default(false)
+  connectedWallet       String?  // Auto-connect this wallet when session loads
+  autoReconnect         Boolean  @default(false) // Enable/disable auto-reconnect
+  totalAssetValueUsd    String?  // Cached total asset value in USD
+  assetBalances         Json?    // Cached token balances with prices
+  lastBalanceUpdate     DateTime? // Last time balances were updated
   userId                String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   
-  paymentLinks PaymentLink[]
+  paymentLinks      PaymentLink[]
+  transactions      Transaction[]
+  transactionSync   TransactionSync?
 }
 
 model PaymentLink {
@@ -34,6 +41,68 @@ model PaymentLink {
   status      String       @default("pending")
   createdAt   DateTime     @default(now())
   expiresAt   DateTime?
+  
+  session SafeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model Transaction {
+  id                    String   @id @default(uuid())
+  sessionId             String
+  safeAddress           String
+  safeTxHash            String   @unique
+  txType                String?  // MULTISIG_TRANSACTION, ETHEREUM_TRANSACTION, MODULE_TRANSACTION
+  executionDate         DateTime?
+  submissionDate        DateTime?
+  modified              DateTime?
+  blockNumber           Int?
+  transactionHash       String?
+  safe                  String
+  to                    String
+  value                 String
+  data                  String?
+  operation             Int
+  gasToken              String?
+  safeTxGas             String?
+  baseGas               String?
+  gasPrice              String?
+  refundReceiver        String?
+  nonce                 Int
+  executor              String?
+  isExecuted            Boolean  @default(false)
+  isSuccessful          Boolean?
+  ethGasPrice           String?
+  maxFeePerGas          String?
+  maxPriorityFeePerGas  String?
+  gasUsed               String?
+  fee                   String?
+  origin                String?
+  dataDecoded           Json?
+  confirmationsRequired Int?
+  confirmations         Json?    // Array of confirmations with owner and signature
+  trusted               Boolean  @default(false)
+  proposer              String?
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  session SafeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  @@index([safeAddress])
+  @@index([sessionId])
+  @@index([isExecuted])
+  @@index([executionDate])
+}
+
+model TransactionSync {
+  id           String   @id @default(uuid())
+  sessionId    String   @unique
+  safeAddress  String
+  lastSyncAt   DateTime
+  lastTxHash   String?
+  totalSynced  Int      @default(0)
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
   
   session SafeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 }

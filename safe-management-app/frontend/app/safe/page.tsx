@@ -7,24 +7,93 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { AlertCircle, CheckCircle2, Clock, Copy, ExternalLink, Wallet } from 'lucide-react';
-import { useSafe } from '@safe-global/safe-react-hooks';
+import { useSafe } from '@/app/providers/SafeProvider';
 import { toast } from 'sonner';
 import { formatEther } from 'ethers';
 import Link from 'next/link';
+import * as safeService from '@/lib/services/safeService';
+import * as transactionService from '@/lib/services/transactionService';
+
+interface TokenValue {
+  symbol: string;
+  name: string;
+  balance: number;
+  usdValue: number;
+  address?: string;
+}
 
 export default function SafeDashboard() {
-  const { getSafeInfo, getBalance, getPendingTransactions } = useSafe();
+  const { safeClient, session } = useSafe();
   
-  // Use hooks properly - these return TanStack Query objects
-  const safeInfoQuery = getSafeInfo();
-  const balanceQuery = getBalance();
-  const pendingTransactionsQuery = getPendingTransactions();
+  const [safeInfo, setSafeInfo] = useState<safeService.SafeInfo | null>(null);
+  const [balance, setBalance] = useState<string>('0');
+  const [fiatBalance, setFiatBalance] = useState<string | null>(null);
+  const [fiatCode, setFiatCode] = useState<string>('USD');
+  const [tokens, setTokens] = useState<TokenValue[]>([]);
+  const [pendingCount, setPendingCount] = useState<number>(0);
+  const [loading, setLoading] = useState(true);
 
-  // Extract data and loading states
-  const safeInfo = safeInfoQuery.data;
-  const balance = balanceQuery.data ? formatEther(balanceQuery.data.value) : '0';
-  const pendingCount = pendingTransactionsQuery.data?.length || 0;
-  const loading = safeInfoQuery.isLoading || balanceQuery.isLoading || pendingTransactionsQuery.isLoading;
+  // Fetch Safe data using services
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!safeClient) {
+        console.log('[Dashboard] No safeClient available');
+        setLoading(false);
+        return;
+      }
+
+      try {
+        console.log('[Dashboard] Starting to fetch Safe data...');
+        setLoading(true);
+        
+        // Get Safe info using service
+        console.log('[Dashboard] Fetching Safe info...');
+        const info = await safeService.getSafeInfo(safeClient);
+        console.log('[Dashboard] Safe info received:', info);
+        setSafeInfo(info);
+        
+        // Get total asset value (all tokens combined)
+        console.log('[Dashboard] Fetching total asset value...');
+        const assetValue = await safeService.getTotalAssetValue(safeClient);
+        console.log('[Dashboard] Total asset value:', assetValue);
+        
+        // Find ETH balance from tokens
+        const ethToken = assetValue.tokens.find(t => t.symbol === 'ETH');
+        setBalance(ethToken?.balance.toFixed(4) || '0.0000');
+        setFiatBalance(assetValue.totalUsd);
+        setFiatCode('USD');
+        setTokens(assetValue.tokens);
+        
+        // Get pending transactions using service
+        console.log('[Dashboard] Fetching pending transactions...');
+        const pending = await transactionService.getPendingTransactions(safeClient);
+        console.log('[Dashboard] Pending transactions received:', pending.length, 'transactions');
+        setPendingCount(pending.length);
+        
+        console.log('[Dashboard] ===== COMPLETE SAFE DATA =====');
+        console.log('[Dashboard] Address:', info.address);
+        console.log('[Dashboard] ETH Balance:', ethToken?.balance.toFixed(4) || '0', 'ETH');
+        console.log('[Dashboard] Total Asset Value:', '$' + assetValue.totalUsd, 'USD');
+        console.log('[Dashboard] Number of tokens:', assetValue.tokens.length);
+        assetValue.tokens.forEach(token => {
+          console.log(`[Dashboard]   - ${token.symbol}: ${token.balance} = $${token.usdValue.toFixed(2)}`);
+        });
+        console.log('[Dashboard] Owners:', info.owners);
+        console.log('[Dashboard] Threshold:', info.threshold, 'of', info.owners.length);
+        console.log('[Dashboard] Nonce:', info.nonce);
+        console.log('[Dashboard] Pending transactions:', pending.length);
+        console.log('[Dashboard] ================================');
+        
+      } catch (error) {
+        console.error('[Dashboard] Failed to fetch Safe data:', error);
+        toast.error('Failed to load Safe data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [safeClient]);
 
   const copyAddress = async (address: string) => {
     try {
@@ -33,11 +102,6 @@ export default function SafeDashboard() {
     } catch (error) {
       toast.error('Failed to copy address');
     }
-  };
-
-  const truncateAddress = (address: string) => {
-    if (!address) return '';
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
   };
 
   if (loading) {
@@ -95,13 +159,20 @@ export default function SafeDashboard() {
         {/* Balance Card */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Balance</CardTitle>
+            <CardTitle className="text-sm font-medium">Total Assets</CardTitle>
             <Wallet className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{balance} ETH</div>
+            {fiatBalance && (
+              <div className="text-2xl font-bold">
+                ${parseFloat(fiatBalance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground mt-1">
+              {tokens.length} {tokens.length === 1 ? 'asset' : 'assets'}
+            </p>
             <p className="text-xs text-muted-foreground mt-1">
-              Available balance
+              Total value in USD
             </p>
           </CardContent>
         </Card>
@@ -162,7 +233,7 @@ export default function SafeDashboard() {
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Address</span>
             <div className="flex items-center gap-2">
-              <code className="text-sm font-mono">{truncateAddress(safeInfo.address || '')}</code>
+              <code className="text-sm font-mono">{transactionService.truncateAddress(safeInfo.address || '')}</code>
               <Button
                 variant="ghost"
                 size="sm"
@@ -200,6 +271,56 @@ export default function SafeDashboard() {
         </CardContent>
       </Card>
 
+      {/* Token Balances Card */}
+      {tokens.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Assets ({tokens.length})</CardTitle>
+            <CardDescription>Token balances and values</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Token</TableHead>
+                  <TableHead className="text-right">Balance</TableHead>
+                  <TableHead className="text-right">Value (USD)</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {tokens.map((token, index) => (
+                  <TableRow key={token.address || token.symbol}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium">
+                          {token.symbol.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="font-medium">{token.symbol}</div>
+                          <div className="text-xs text-muted-foreground">{token.name}</div>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {token.balance.toLocaleString('en-US', { 
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 4 
+                      })}
+                    </TableCell>
+                    <TableCell className="text-right font-medium">
+                      ${token.usdValue.toLocaleString('en-US', { 
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2 
+                      })}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Owners Card */}
       <Card>
         <CardHeader>
@@ -222,7 +343,7 @@ export default function SafeDashboard() {
                       <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium">
                         {owner.slice(2, 4).toUpperCase()}
                       </div>
-                      <code className="text-sm font-mono">{truncateAddress(owner)}</code>
+                      <code className="text-sm font-mono">{transactionService.truncateAddress(owner)}</code>
                     </div>
                   </TableCell>
                   <TableCell className="text-right">

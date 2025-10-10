@@ -30,9 +30,50 @@ class SafeService {
   async getSafeInfo(address = null) {
     try {
       const safeAddr = address || this.safeAddress;
+      console.log(`[SafeService] Fetching Safe info for ${safeAddr} from ${this.transactionServiceUrl}`);
+      
       const response = await this.client.get(`/api/v1/safes/${safeAddr}/`);
+      
+      if (!response.data) {
+        throw new Error('Empty response from Safe Transaction Service');
+      }
+      
+      console.log('[SafeService] ===== FULL SAFE INFO FROM API =====');
+      console.log('[SafeService] Complete response:', JSON.stringify(response.data, null, 2));
+      console.log('[SafeService] ===================================');
+      
+      console.log('[SafeService] Safe info retrieved successfully:', {
+        address: response.data.address,
+        owners: response.data.owners?.length || 0,
+        ownersList: response.data.owners,
+        threshold: response.data.threshold,
+        nonce: response.data.nonce,
+        version: response.data.version,
+        masterCopy: response.data.masterCopy,
+        modules: response.data.modules,
+        fallbackHandler: response.data.fallbackHandler,
+        guard: response.data.guard
+      });
+      
       return response.data;
     } catch (error) {
+      console.error('Error fetching Safe info:', {
+        address: address || this.safeAddress,
+        transactionServiceUrl: this.transactionServiceUrl,
+        error: error.message,
+        response: error.response?.data
+      });
+      
+      if (error.response?.status === 404) {
+        throw new Error(`Safe account not found at address ${address || this.safeAddress}. Please verify the address is correct.`);
+      } else if (error.response?.status === 401 || error.response?.status === 403) {
+        throw new Error('Authentication failed. Please check your API key.');
+      } else if (error.code === 'ECONNREFUSED') {
+        throw new Error(`Cannot connect to Safe Transaction Service at ${this.transactionServiceUrl}. Please verify the service URL.`);
+      } else if (error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND') {
+        throw new Error('Network error: Unable to reach Safe Transaction Service. Please check your network connection.');
+      }
+      
       throw new Error(`Failed to get Safe info: ${error.message}`);
     }
   }
@@ -79,9 +120,40 @@ class SafeService {
   async getBalances(address = null) {
     try {
       const safeAddr = address || this.safeAddress;
+      console.log(`[SafeService] Fetching balances for Safe: ${safeAddr}`);
+      
       const response = await this.client.get(`/api/v1/safes/${safeAddr}/balances/`);
+      
+      console.log('[SafeService] ===== FULL BALANCES FROM API =====');
+      console.log('[SafeService] Complete response:', JSON.stringify(response.data, null, 2));
+      console.log('[SafeService] ===================================');
+      
+      console.log(`[SafeService] Balances retrieved for ${safeAddr}:`, response.data.length, 'assets');
+      
+      // Log ETH balance specifically with fiat values
+      const ethBalance = response.data.find(balance => 
+        balance.tokenAddress === null || balance.tokenAddress === '0x0000000000000000000000000000000000000000'
+      );
+      
+      if (ethBalance) {
+        const ethValue = Number(ethBalance.balance) / 1e18;
+        console.log('[SafeService] ===== ETH BALANCE DETAILS =====');
+        console.log('[SafeService] ETH Balance:', ethValue.toFixed(4), 'ETH');
+        console.log('[SafeService] Fiat Balance:', ethBalance.fiatBalance, ethBalance.fiatCode || 'USD');
+        console.log('[SafeService] ETH Price (fiatConversion):', ethBalance.fiatConversion, ethBalance.fiatCode || 'USD');
+        console.log('[SafeService] Token Info:', ethBalance.token);
+        console.log('[SafeService] ================================');
+      }
+      
       return response.data;
     } catch (error) {
+      console.error(`Failed to get Safe balances for ${address || this.safeAddress}:`, error.message);
+      
+      if (error.response?.status === 404) {
+        throw new Error(`Safe not found at address ${address || this.safeAddress}`);
+      } else if (error.request) {
+        throw new Error(`Cannot reach Safe Transaction Service. Please check your connection.`);
+      }
       throw new Error(`Failed to get Safe balances: ${error.message}`);
     }
   }
@@ -107,11 +179,26 @@ class SafeService {
   async getPendingTransactions(address = null) {
     try {
       const safeAddr = address || this.safeAddress;
+      console.log(`[SafeService] Fetching pending transactions for Safe: ${safeAddr}`);
+      
       const response = await this.client.get(`/api/v1/safes/${safeAddr}/multisig-transactions/`, {
         params: { executed: false }
       });
+      
+      console.log('[SafeService] ===== PENDING TRANSACTIONS FROM API =====');
+      console.log('[SafeService] Complete response:', JSON.stringify(response.data, null, 2));
+      console.log('[SafeService] ======================================');
+      
+      console.log(`[SafeService] Found ${response.data.results?.length || 0} pending transactions`);
       return response.data;
     } catch (error) {
+      console.error(`Failed to get pending transactions for ${address || this.safeAddress}:`, error.message);
+      
+      if (error.response?.status === 404) {
+        throw new Error(`Safe not found at address ${address || this.safeAddress}`);
+      } else if (error.request) {
+        throw new Error(`Cannot reach Safe Transaction Service. Please check your connection.`);
+      }
       throw new Error(`Failed to get pending transactions: ${error.message}`);
     }
   }
@@ -136,9 +223,20 @@ class SafeService {
   async proposeTransaction(txData) {
     try {
       const safeAddr = txData.safeAddress || this.safeAddress;
+      console.log(`Proposing transaction for Safe: ${safeAddr}`);
+      
+      // Validate required fields
+      if (!txData.to) {
+        throw new Error('Transaction recipient address (to) is required');
+      }
       
       // Get current nonce
-      const nonce = await this.getNonce(safeAddr);
+      let nonce;
+      try {
+        nonce = await this.getNonce(safeAddr);
+      } catch (error) {
+        throw new Error(`Failed to get Safe nonce: ${error.message}`);
+      }
       
       const payload = {
         to: txData.to,
@@ -157,13 +255,40 @@ class SafeService {
         origin: txData.origin || 'Safe Management App'
       };
       
+      console.log('Proposing transaction with payload:', {
+        to: payload.to,
+        value: payload.value,
+        nonce: payload.nonce,
+        sender: payload.sender
+      });
+      
       const response = await this.client.post(
         `/api/v1/safes/${safeAddr}/multisig-transactions/`,
         payload
       );
       
+      console.log('Transaction proposed successfully:', response.data.safeTxHash || 'no hash returned');
       return response.data;
     } catch (error) {
+      console.error('Failed to propose transaction:', error.message);
+      
+      if (error.response) {
+        const status = error.response.status;
+        const data = error.response.data;
+        
+        if (status === 400) {
+          const errorDetail = data?.nonFieldErrors?.[0] || data?.detail || JSON.stringify(data);
+          throw new Error(`Invalid transaction data: ${errorDetail}`);
+        } else if (status === 422) {
+          throw new Error(`Transaction validation failed: ${data?.detail || JSON.stringify(data)}`);
+        } else if (status === 404) {
+          throw new Error(`Safe not found. Please verify the Safe address.`);
+        } else {
+          throw new Error(`Failed to propose transaction (${status}): ${data?.detail || error.message}`);
+        }
+      } else if (error.request) {
+        throw new Error(`Cannot reach Safe Transaction Service. Please check your connection.`);
+      }
       throw new Error(`Failed to propose transaction: ${error.message}`);
     }
   }

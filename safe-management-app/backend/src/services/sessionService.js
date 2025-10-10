@@ -59,7 +59,18 @@ async function createSession(data) {
 
 // Update an existing session
 async function updateSession(id, data) {
-  const { name, safeAddress, apiKey, chainId, rpcUrl, transactionServiceUrl, isDefault } = data;
+  const { 
+    name, 
+    safeAddress, 
+    apiKey, 
+    chainId, 
+    rpcUrl, 
+    transactionServiceUrl, 
+    isDefault,
+    totalAssetValueUsd,
+    assetBalances,
+    lastBalanceUpdate
+  } = data;
   
   // If setting as default, unset all other defaults first
   if (isDefault) {
@@ -78,7 +89,10 @@ async function updateSession(id, data) {
       ...(chainId && { chainId }),
       ...(rpcUrl && { rpcUrl }),
       ...(transactionServiceUrl && { transactionServiceUrl }),
-      ...(isDefault !== undefined && { isDefault })
+      ...(isDefault !== undefined && { isDefault }),
+      ...(totalAssetValueUsd !== undefined && { totalAssetValueUsd }),
+      ...(assetBalances !== undefined && { assetBalances }),
+      ...(lastBalanceUpdate !== undefined && { lastBalanceUpdate })
     }
   });
 }

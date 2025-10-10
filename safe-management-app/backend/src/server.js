@@ -6,6 +6,8 @@ require('dotenv').config();
 const sessionsRoutes = require('./routes/sessions.routes');
 const safeRoutes = require('./routes/safe.routes');
 const paymentLinksRoutes = require('./routes/payment-links.routes');
+const transactionsRoutes = require('./routes/transactions.routes');
+const pricesRoutes = require('./routes/prices.routes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -23,6 +25,8 @@ app.get('/health', (req, res) => {
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api/safe', safeRoutes);
 app.use('/api/payment-links', paymentLinksRoutes);
+app.use('/api/transactions', transactionsRoutes);
+app.use('/api/prices', pricesRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -48,6 +52,8 @@ app.listen(PORT, () => {
   console.log(`   - Sessions: http://localhost:${PORT}/api/sessions`);
   console.log(`   - Safe: http://localhost:${PORT}/api/safe/:sessionId/*`);
   console.log(`   - Payment Links: http://localhost:${PORT}/api/payment-links`);
+  console.log(`   - Transactions: http://localhost:${PORT}/api/transactions/:sessionId`);
+  console.log(`   - Prices: http://localhost:${PORT}/api/prices/*`);
 });
 
 module.exports = app;

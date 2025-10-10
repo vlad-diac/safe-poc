@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { getSessionById } = require('../services/sessionService');
+const { getSessionById, updateSession } = require('../services/sessionService');
 const { createSafeService } = require('../services/safeService');
+const priceService = require('../services/priceService');
 
 // Middleware to load session and create Safe service
 async function loadSafeService(req, res, next) {
@@ -38,7 +39,7 @@ router.get('/:sessionId/info', loadSafeService, async (req, res) => {
   }
 });
 
-// Get Safe balances
+// Get Safe balances (raw data from Transaction Service)
 router.get('/:sessionId/balances', loadSafeService, async (req, res) => {
   try {
     const balances = await req.safeService.getBalances();
@@ -46,6 +47,57 @@ router.get('/:sessionId/balances', loadSafeService, async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: 'Failed to fetch Safe balances',
+      details: error.message
+    });
+  }
+});
+
+// Get Safe asset value with prices (cached in session)
+router.get('/:sessionId/asset-value', loadSafeService, async (req, res) => {
+  try {
+    const { force } = req.query;
+    
+    // Check if we have cached data and it's recent (< 5 minutes)
+    const cacheValid = req.session.lastBalanceUpdate && 
+                      req.session.assetBalances &&
+                      req.session.totalAssetValueUsd &&
+                      (Date.now() - new Date(req.session.lastBalanceUpdate).getTime() < 300000) && // 5 minutes
+                      !force;
+    
+    if (cacheValid) {
+      console.log('[Safe Routes] Returning cached asset value for session:', req.session.id);
+      return res.json({
+        totalUsd: req.session.totalAssetValueUsd,
+        tokens: req.session.assetBalances,
+        cached: true,
+        lastUpdate: req.session.lastBalanceUpdate,
+      });
+    }
+    
+    // Fetch fresh data
+    console.log('[Safe Routes] Calculating fresh asset value for session:', req.session.id);
+    const balances = await req.safeService.getBalances();
+    const assetValue = await priceService.calculateTotalAssetValue(balances);
+    
+    // Save to session
+    await updateSession(req.session.id, {
+      totalAssetValueUsd: assetValue.totalUsd,
+      assetBalances: assetValue.tokens,
+      lastBalanceUpdate: new Date(),
+    });
+    
+    console.log('[Safe Routes] Saved asset value to session:', assetValue.totalUsd);
+    
+    res.json({
+      totalUsd: assetValue.totalUsd,
+      tokens: assetValue.tokens,
+      cached: false,
+      lastUpdate: new Date(),
+    });
+  } catch (error) {
+    console.error('[Safe Routes] Error fetching asset value:', error);
+    res.status(500).json({
+      error: 'Failed to calculate asset value',
       details: error.message
     });
   }

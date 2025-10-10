@@ -1,11 +1,9 @@
 'use client';
 
-import { SafeProvider as SafeReactProvider } from '@safe-global/safe-react-hooks';
-import { createConfig } from '@safe-global/safe-react-hooks';
-import { ReactNode, useEffect, useState, createContext, useContext } from 'react';
+import { createSafeClient, SafeClient } from '@safe-global/sdk-starter-kit';
+import { ReactNode, useEffect, useState, createContext, useContext, useCallback } from 'react';
 import { toast } from 'sonner';
-import { mainnet, sepolia, goerli, polygon, optimism, arbitrum } from 'viem/chains';
-import { createWalletClient, custom } from 'viem';
+import { mainnet, sepolia, goerli, polygon, optimism, arbitrum, Chain } from 'viem/chains';
 
 // Declare window.ethereum for TypeScript
 declare global {
@@ -30,14 +28,20 @@ interface SafeProviderWrapperProps {
   sessionId?: string;
 }
 
-interface SessionContextType {
+interface SafeContextType {
+  safeClient: SafeClient | null;
   session: SafeSession | null;
+  connectedWallet: string | null;
+  isConnecting: boolean;
+  isOwner: boolean;
+  connect: (address: string) => Promise<void>;
+  disconnect: () => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   refreshSession: () => Promise<void>;
 }
 
 // Chain mapping for viem chains
-const CHAIN_MAP: Record<number, any> = {
+const CHAIN_MAP: Record<number, Chain> = {
   1: mainnet,
   11155111: sepolia,
   5: goerli,
@@ -46,11 +50,20 @@ const CHAIN_MAP: Record<number, any> = {
   42161: arbitrum,
 };
 
-// Create Session Context for session switching
-const SessionContext = createContext<SessionContextType | null>(null);
+// Create Safe Context
+const SafeContext = createContext<SafeContextType | null>(null);
 
+export function useSafe() {
+  const context = useContext(SafeContext);
+  if (!context) {
+    throw new Error('useSafe must be used within SafeProviderWrapper');
+  }
+  return context;
+}
+
+// Keep useSession for backward compatibility
 export function useSession() {
-  const context = useContext(SessionContext);
+  const context = useContext(SafeContext);
   if (!context) {
     throw new Error('useSession must be used within SafeProviderWrapper');
   }
@@ -60,8 +73,11 @@ export function useSession() {
 export function SafeProviderWrapper({ children, sessionId: initialSessionId }: SafeProviderWrapperProps) {
   const [session, setSession] = useState<SafeSession | null>(null);
   const [loading, setLoading] = useState(true);
-  const [config, setConfig] = useState<any>(null);
+  const [safeClient, setSafeClient] = useState<SafeClient | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(initialSessionId);
+  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
 
   const fetchSession = async (sessionIdToFetch?: string) => {
     try {
@@ -104,50 +120,59 @@ export function SafeProviderWrapper({ children, sessionId: initialSessionId }: S
         console.log('💾 Saved session to localStorage:', data.id, data.name);
       }
 
-      // Get the correct viem chain
-      const chain = CHAIN_MAP[data.chainId] || mainnet;
-      
-      // Create Safe config from session
-      // IMPORTANT: 
-      // - If wallet is available, use custom(window.ethereum) for both reading AND signing
-      // - Otherwise, fallback to RPC URL (read-only mode)
-      // - This ensures signing operations use the wallet, not the RPC provider
+      // Check if wallet is available
       const hasWallet = typeof window !== 'undefined' && window.ethereum;
       
-      console.log('🔧 SafeProvider Configuration:', {
-        hasWallet,
+      console.log('🔧 SDK Starter Kit Configuration:', {
+        providerType: hasWallet ? 'window.ethereum (for signing)' : 'RPC URL (read-only)',
         rpcUrl: data.rpcUrl,
+        hasWindowEthereum: hasWallet,
         safeAddress: data.safeAddress,
         chainId: data.chainId,
-        providerType: hasWallet ? 'window.ethereum (wallet)' : 'RPC URL',
       });
       
-      // Create provider based on wallet availability
-      let provider;
-      if (hasWallet) {
-        // Create a viem wallet client for the browser wallet
-        // This properly handles signing operations
-        provider = createWalletClient({
-          chain,
-          transport: custom(window.ethereum),
-        });
-        console.log('✅ Using wallet client for signing');
-      } else {
-        // Fallback to RPC URL for read-only operations
-        provider = data.rpcUrl;
-        console.warn('⚠️ No wallet detected - running in read-only mode');
+      // Initialize SafeClient with window.ethereum if available, otherwise RPC URL
+      // When window.ethereum is available, signing will work properly
+      console.log('[SafeProvider] Creating SafeClient with config:', {
+        provider: hasWallet ? 'window.ethereum' : data.rpcUrl,
+        signer: data.connectedWallet || 'undefined',
+        safeAddress: data.safeAddress,
+        apiKey: data.apiKey ? 'provided' : 'not provided',
+        chainId: data.chainId,
+      });
+      
+      const client = await createSafeClient({
+        provider: hasWallet ? window.ethereum : data.rpcUrl,
+        signer: data.connectedWallet || undefined, // Use saved wallet if auto-reconnecting
+        safeAddress: data.safeAddress,
+        apiKey: data.apiKey, // Required for Safe Transaction Service
+      });
+      
+      setSafeClient(client);
+      
+      // Log SafeClient details
+      try {
+        const [address, owners, threshold, nonce] = await Promise.all([
+          client.getAddress(),
+          client.getOwners(),
+          client.getThreshold(),
+          client.getNonce(),
+        ]);
+        
+        console.log('[SafeProvider] ===== SAFE CLIENT INITIALIZED =====');
+        console.log('[SafeProvider] Safe Address:', address);
+        console.log('[SafeProvider] Owners:', owners);
+        console.log('[SafeProvider] Threshold:', threshold);
+        console.log('[SafeProvider] Nonce:', nonce);
+        console.log('[SafeProvider] Provider type:', hasWallet ? 'window.ethereum' : 'RPC URL');
+        console.log('[SafeProvider] Connected Wallet:', data.connectedWallet || 'none');
+        console.log('[SafeProvider] =====================================');
+      } catch (err) {
+        console.error('[SafeProvider] Error fetching Safe details:', err);
       }
       
-      const safeConfig = createConfig({
-        chain: chain,
-        provider,
-        signer: '0x0000000000000000000000000000000000000000', // Will be set via connect()
-        safeAddress: data.safeAddress,
-      });
-      
-      console.log('✅ Safe config created');
+      console.log('✅ SafeClient initialized');
 
-      setConfig(safeConfig);
       return data;
     } catch (error) {
       console.error('Failed to load session:', error);
@@ -175,6 +200,118 @@ export function SafeProviderWrapper({ children, sessionId: initialSessionId }: S
     await fetchSession(currentSessionId);
   };
 
+  const connect = useCallback(async (address: string) => {
+    if (!session || !window.ethereum) {
+      throw new Error('Session or window.ethereum not available');
+    }
+
+    try {
+      console.log('🔌 Connecting signer to SafeClient:', address);
+      
+      // Create a new SafeClient with the signer
+      const clientWithSigner = await createSafeClient({
+        provider: window.ethereum,
+        signer: address,
+        safeAddress: session.safeAddress,
+        apiKey: session.apiKey, // Required for Safe Transaction Service
+      });
+      
+      setSafeClient(clientWithSigner);
+      
+      // Check if the address is an owner
+      const owners = await clientWithSigner.getOwners();
+      const isOwnerAccount = owners.some(owner => owner.toLowerCase() === address.toLowerCase());
+      setIsOwner(isOwnerAccount);
+      
+      console.log('✅ Signer connected to SafeClient:', { address, isOwner: isOwnerAccount });
+    } catch (error) {
+      console.error('Failed to connect signer:', error);
+      throw error;
+    }
+  }, [session]);
+
+  const disconnect = useCallback(async () => {
+    if (!session) return;
+    
+    try {
+      // Reinitialize SafeClient without signer
+      const client = await createSafeClient({
+        provider: window.ethereum || session.rpcUrl,
+        signer: undefined,
+        safeAddress: session.safeAddress,
+        apiKey: session.apiKey, // Required for Safe Transaction Service
+      });
+      
+      setSafeClient(client);
+      setIsOwner(false);
+      console.log('🔌 Disconnected signer from SafeClient');
+    } catch (error) {
+      console.error('Failed to disconnect:', error);
+      throw error;
+    }
+  }, [session]);
+
+  const connectWallet = async (walletAddress: string, autoReconnect?: boolean) => {
+    if (!session) {
+      throw new Error('No active session');
+    }
+    
+    try {
+      setIsConnecting(true);
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      
+      // Save wallet address and autoReconnect preference to session
+      const response = await fetch(`${apiUrl}/api/sessions/${session.id}/connected-wallet`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          walletAddress,
+          autoReconnect: autoReconnect !== undefined ? autoReconnect : session.autoReconnect
+        })
+      });
+      
+      if (!response.ok) throw new Error('Failed to save wallet');
+      
+      const updatedSession = await response.json();
+      setSession(updatedSession);
+      setConnectedWallet(walletAddress);
+      console.log('💾 Connected wallet to session:', walletAddress, 'Auto-reconnect:', updatedSession.autoReconnect);
+    } catch (error) {
+      console.error('Failed to connect wallet:', error);
+      throw error;
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const disconnectWallet = async () => {
+    if (!session) {
+      throw new Error('No active session');
+    }
+    
+    try {
+      setIsConnecting(true);
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      
+      // Clear wallet address from session
+      const response = await fetch(`${apiUrl}/api/sessions/${session.id}/connected-wallet`, {
+        method: 'DELETE'
+      });
+      
+      if (!response.ok) throw new Error('Failed to clear wallet');
+      
+      const updatedSession = await response.json();
+      setSession(updatedSession);
+      setConnectedWallet(null);
+      console.log('🗑️ Disconnected wallet from session');
+    } catch (error) {
+      console.error('Failed to disconnect wallet:', error);
+      throw error;
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
   useEffect(() => {
     fetchSession(currentSessionId);
   }, []);
@@ -190,7 +327,7 @@ export function SafeProviderWrapper({ children, sessionId: initialSessionId }: S
     );
   }
 
-  if (!session || !config) {
+  if (!session || !safeClient) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center max-w-md">
@@ -212,17 +349,21 @@ export function SafeProviderWrapper({ children, sessionId: initialSessionId }: S
     );
   }
 
-  const sessionContextValue: SessionContextType = {
+  const contextValue: SafeContextType = {
+    safeClient,
     session,
+    connectedWallet,
+    isConnecting,
+    isOwner,
+    connect,
+    disconnect,
     switchSession,
     refreshSession,
   };
 
   return (
-    <SessionContext.Provider value={sessionContextValue}>
-      <SafeReactProvider config={config}>
-        {children}
-      </SafeReactProvider>
-    </SessionContext.Provider>
+    <SafeContext.Provider value={contextValue}>
+      {children}
+    </SafeContext.Provider>
   );
 }

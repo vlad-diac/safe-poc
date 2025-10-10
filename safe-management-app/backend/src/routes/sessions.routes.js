@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const sessionService = require('../services/sessionService');
+const { createSafeService } = require('../services/safeService');
 
 // Get all sessions
 router.get('/', async (req, res) => {
@@ -151,6 +152,68 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: 'Failed to delete session',
+      details: error.message
+    });
+  }
+});
+
+// Get Safe info by address (public endpoint for payment execution)
+router.get('/safe/:address/info', async (req, res) => {
+  try {
+    const { address } = req.params;
+    
+    if (!address) {
+      return res.status(400).json({
+        error: 'Safe address is required',
+        details: 'Please provide a valid Safe address'
+      });
+    }
+
+    console.log(`Fetching Safe info for address: ${address}`);
+
+    // Find any session with this Safe address to get configuration
+    const sessions = await sessionService.getAllSessions();
+    const session = sessions.find(s => 
+      s.safeAddress.toLowerCase() === address.toLowerCase()
+    );
+
+    if (!session) {
+      return res.status(404).json({
+        error: 'No session found for this Safe address',
+        details: `No configuration found for Safe address ${address}. Please ensure a session exists for this Safe.`
+      });
+    }
+
+    // Create Safe service instance
+    const safeService = createSafeService(session);
+    
+    // Get Safe info
+    let safeInfo;
+    try {
+      safeInfo = await safeService.getSafeInfo(address);
+    } catch (error) {
+      console.error('Failed to fetch Safe info from Transaction Service:', error);
+      return res.status(500).json({
+        error: 'Failed to fetch Safe information',
+        details: error.message
+      });
+    }
+
+    // Return Safe info (without sensitive session data)
+    res.json({
+      address: safeInfo.address,
+      owners: safeInfo.owners,
+      threshold: safeInfo.threshold,
+      nonce: safeInfo.nonce,
+      version: safeInfo.version,
+      modules: safeInfo.modules || [],
+      guard: safeInfo.guard || null
+    });
+
+  } catch (error) {
+    console.error('Error fetching Safe info:', error);
+    res.status(500).json({
+      error: 'Failed to fetch Safe info',
       details: error.message
     });
   }

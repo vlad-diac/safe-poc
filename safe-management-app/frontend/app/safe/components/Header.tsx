@@ -5,21 +5,16 @@ import { Copy, CheckCircle2, ExternalLink } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { WalletConnect } from './WalletConnect';
-import { useSafe } from '@safe-global/safe-react-hooks';
-import { useSession } from '@/app/providers/SafeProvider';
+import { useSafe } from '@/app/providers/SafeProvider';
 import { toast } from 'sonner';
 
 export function Header() {
   const [copied, setCopied] = useState(false);
-  const { getSafeInfo, getChain } = useSafe();
-  const { session } = useSession();
+  const { safeClient, session } = useSafe();
 
-  // Get Safe info and chain data
-  const safeInfoQuery = getSafeInfo();
-  const chain = getChain();
-  
-  const safeAddress = safeInfoQuery.data?.address;
-  const chainName = chain?.name || 'Unknown Network';
+  // Get Safe info from session
+  const safeAddress = session?.safeAddress;
+  const chainName = session?.chainId === 1 ? 'Ethereum' : session?.chainId === 11155111 ? 'Sepolia' : `Chain ${session?.chainId}`;
 
   const copyAddress = async () => {
     if (!safeAddress) return;
@@ -73,7 +68,7 @@ export function Header() {
                 className="h-8 w-8 p-0"
               >
                 <a
-                  href={`https://app.safe.global/home?safe=${chain?.id}:${safeAddress}`}
+                  href={`https://app.safe.global/home?safe=${session?.chainId}:${safeAddress}`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >

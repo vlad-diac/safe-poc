@@ -7,10 +7,11 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Send, Loader2, CheckCircle2, AlertTriangle, Wallet } from 'lucide-react';
-import { useSendTransaction, useSafe } from '@safe-global/safe-react-hooks';
+import { useSafe } from '@/app/providers/SafeProvider';
 import { toast } from 'sonner';
 import { parseEther } from 'ethers';
 import { useRouter } from 'next/navigation';
+import * as transactionService from '@/lib/services/transactionService';
 
 export default function CreateTransactionPage() {
   const router = useRouter();
@@ -23,18 +24,75 @@ export default function CreateTransactionPage() {
   const [submitting, setSubmitting] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
 
-  // Get Safe connection status
-  const { isSignerConnected, isOwnerConnected } = useSafe();
+  // Get Safe context
+  const { safeClient, connectedWallet, isOwner } = useSafe();
 
-  // Use the Safe SDK hook for sending transactions
-  const { sendTransaction, data: txData, isPending, isSuccess, error: txError } = useSendTransaction();
-
-  // Update txHash when transaction is successful
+  // Debug connection status
   useEffect(() => {
-    if (isSuccess && txData) {
-      // txData might contain hash or transactionHash depending on the SDK version
-      const hash = (txData as any).safeTxHash || (txData as any).hash || (txData as any).transactionHash || '';
-      setTxHash(hash);
+    console.log('🔍 Create Transaction Page - Connection Status:', {
+      hasClient: !!safeClient,
+      connectedWallet,
+      isOwner,
+    });
+  }, [safeClient, connectedWallet, isOwner]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!safeClient) {
+      toast.error('Safe client not initialized');
+      return;
+    }
+
+    if (!connectedWallet) {
+      toast.error('No wallet connected. Please connect your wallet.');
+      return;
+    }
+
+    if (!isOwner) {
+      toast.error('Connected wallet is not a Safe owner');
+      return;
+    }
+    
+    console.log('🚀 Form submitted!', {
+      connectedWallet,
+      isOwner,
+      formData
+    });
+    
+    try {
+      setSubmitting(true);
+
+      // Validate address
+      if (!formData.to || !formData.to.match(/^0x[a-fA-F0-9]{40}$/)) {
+        toast.error('Invalid recipient address');
+        return;
+      }
+
+      // Validate value
+      if (!formData.value || isNaN(parseFloat(formData.value))) {
+        toast.error('Invalid ETH value');
+        return;
+      }
+
+      // Prepare transaction using service format
+      const transactions: transactionService.TransactionData[] = [{
+        to: formData.to,
+        value: parseEther(formData.value).toString(),
+        data: formData.data || '0x',
+      }];
+
+      console.log('📤 Sending transaction via transactionService...');
+      
+      // Use transaction service - this will prompt MetaMask for signing
+      const result = await transactionService.sendTransaction(safeClient, { transactions });
+      
+      console.log('✅ Transaction sent!', result);
+      
+      // Extract safe transaction hash from result
+      const safeTxHash = result.safeTxHash || result.ethereumTxHash || '';
+      setTxHash(safeTxHash);
+      
       toast.success('Transaction created successfully!');
       
       // Reset form
@@ -44,54 +102,17 @@ export default function CreateTransactionPage() {
         data: '0x',
         operation: '0',
       });
-    }
-  }, [isSuccess, txData]);
-
-  // Handle transaction errors
-  useEffect(() => {
-    if (txError) {
-      toast.error(txError?.message || 'Failed to create transaction');
-    }
-  }, [txError]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    try {
-      setSubmitting(true);
-
-      // Validate address
-      if (!formData.to || !formData.to.match(/^0x[a-fA-F0-9]{40}$/)) {
-        toast.error('Invalid recipient address');
-        setSubmitting(false);
-        return;
-      }
-
-      // Validate value
-      if (!formData.value || isNaN(parseFloat(formData.value))) {
-        toast.error('Invalid ETH value');
-        setSubmitting(false);
-        return;
-      }
-
-      // Prepare transaction using Safe SDK format
-      const transactions = [{
-        to: formData.to,
-        value: parseEther(formData.value).toString(),
-        data: formData.data || '0x',
-      }];
-
-      // Send transaction using Safe SDK hook
-      // This will automatically:
-      // - Create and propose the transaction if threshold > 1
-      // - Execute immediately if threshold = 1
-      // - Deploy the Safe if not yet deployed
-      await sendTransaction({ transactions });
 
     } catch (error: any) {
-      console.error('Failed to create transaction:', error);
+      console.error('❌ Failed to create transaction:', error);
+      console.error('❌ Error details:', {
+        message: error?.message,
+        code: error?.code,
+        data: error?.data,
+      });
       toast.error(error?.message || 'Failed to create transaction');
     } finally {
+      console.log('🏁 Finally block - resetting submitting state');
       setSubmitting(false);
     }
   };
@@ -152,7 +173,7 @@ export default function CreateTransactionPage() {
       </div>
 
       {/* Connection Status Alerts */}
-      {!isSignerConnected && (
+      {!connectedWallet && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
@@ -162,7 +183,7 @@ export default function CreateTransactionPage() {
         </Alert>
       )}
 
-      {isSignerConnected && !isOwnerConnected && (
+      {connectedWallet && !isOwner && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
@@ -256,15 +277,16 @@ export default function CreateTransactionPage() {
             <div className="pt-4">
               <Button 
                 type="submit" 
-                disabled={submitting || !isSignerConnected || !isOwnerConnected} 
+                disabled={submitting || !connectedWallet || !isOwner} 
                 className="w-full"
+                onClick={() => console.log('🖱️ Button clicked!', { disabled: submitting || !connectedWallet || !isOwner })}
               >
-                {!isSignerConnected ? (
+                {!connectedWallet ? (
                   <>
                     <Wallet className="mr-2 h-4 w-4" />
                     Connect Wallet to Continue
                   </>
-                ) : !isOwnerConnected ? (
+                ) : !isOwner ? (
                   <>
                     <AlertTriangle className="mr-2 h-4 w-4" />
                     Not a Safe Owner

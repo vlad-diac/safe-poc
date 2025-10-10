@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,64 +22,97 @@ import {
   AlertCircle,
   RefreshCw
 } from 'lucide-react';
-import { useSafe, useConfirmTransaction } from '@safe-global/safe-react-hooks';
+import { useSafe } from '@/app/providers/SafeProvider';
 import { toast } from 'sonner';
 import { formatEther } from 'ethers';
 import { useSearchParams } from 'next/navigation';
+import * as transactionService from '@/lib/services/transactionService';
 
 export default function TransactionsPage() {
-  const { getTransactions, getPendingTransactions, isOwnerConnected } = useSafe();
+  const { safeClient, isOwner: isOwnerConnected, session } = useSafe();
   const searchParams = useSearchParams();
   const [filter, setFilter] = useState(searchParams.get('filter') || 'all');
   const [expandedTx, setExpandedTx] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [isOwner, setIsOwner] = useState(false);
+  const [allTransactions, setAllTransactions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Use hooks properly - these return TanStack Query objects
-  // Enable auto-refresh for pending transactions (every 10 seconds)
-  const allTransactionsQuery = getTransactions();
-  const pendingTransactionsQuery = getPendingTransactions();
+  // Sync transactions from Safe Transaction Service to database
+  const syncTransactions = async () => {
+    if (!session?.id) return;
 
-  useEffect(() => {
-    checkOwnerStatus();
-  }, []);
-
-  // Auto-refresh pending transactions to detect new signatures
-  useEffect(() => {
-    const pendingCount = pendingTransactionsQuery.data?.length ?? 0;
-    if (filter === 'pending' && pendingCount > 0) {
-      const intervalId = setInterval(() => {
-        console.log('Auto-refreshing pending transactions...');
-        pendingTransactionsQuery.refetch();
-      }, 10000); // Refresh every 10 seconds
-
-      return () => clearInterval(intervalId);
+    try {
+      setRefreshing(true);
+      toast.info('Syncing transactions from Safe Transaction Service...');
+      
+      await transactionService.syncTransactions(session.id);
+      
+      // Fetch updated transactions
+      await fetchTransactions();
+      
+      toast.success('Transactions synced successfully');
+    } catch (error) {
+      console.error('Failed to sync transactions:', error);
+      toast.error('Failed to sync transactions');
+    } finally {
+      setRefreshing(false);
     }
-  }, [filter, pendingTransactionsQuery.data?.length]);
-
-  const checkOwnerStatus = () => {
-    setIsOwner(isOwnerConnected);
   };
+
+  // Fetch transactions from database
+  const fetchTransactions = async () => {
+    if (!session?.id) return;
+
+    try {
+      setRefreshing(true);
+      
+      // Fetch all transactions from database
+      const all = await transactionService.getAllTransactions(session.id, {
+        limit: 100,
+      });
+      
+      setAllTransactions(all);
+      setLoading(false);
+    } catch (error) {
+      console.error('Failed to fetch transactions:', error);
+      toast.error('Failed to load transactions');
+      setLoading(false);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Load transactions on mount
+  useEffect(() => {
+    if (session?.id) {
+      fetchTransactions();
+    }
+  }, [session?.id]);
 
   // Determine which data to use based on filter
   const getCurrentTransactions = () => {
     if (filter === 'pending') {
-      return pendingTransactionsQuery.data || [];
-    } else {
-      const allTxs = allTransactionsQuery.data || [];
-      if (filter === 'all') {
-        return allTxs;
-      } else if (filter === 'executed') {
-        return allTxs.filter((tx: any) => tx.isExecuted);
-      } else if (filter === 'failed') {
-        return allTxs.filter((tx: any) => tx.isExecuted === false && tx.confirmations?.length > 0);
-      }
-      return allTxs;
+      // A transaction is pending if it's not executed and has a confirmations field
+      // This matches the logic in getStatusBadge
+      return allTransactions.filter((tx: any) => {
+        // Must have confirmations field (indicating it's a multisig transaction)
+        // and must not be executed
+        return tx.confirmations !== undefined && !tx.isExecuted;
+      });
+    } else if (filter === 'all') {
+      return allTransactions;
+    } else if (filter === 'executed') {
+      return allTransactions.filter((tx: any) => tx.isExecuted === true);
+    } else if (filter === 'failed') {
+      return allTransactions.filter((tx: any) => 
+        tx.isExecuted === false && tx.confirmations?.length > 0
+      );
     }
+    return allTransactions;
   };
 
   const transactions = getCurrentTransactions();
-  const loading = filter === 'pending' ? pendingTransactionsQuery.isLoading : allTransactionsQuery.isLoading;
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -157,31 +190,35 @@ export default function TransactionsPage() {
           <h1 className="text-3xl font-bold">Transactions</h1>
           <p className="text-muted-foreground">Manage and review your Safe transactions</p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            if (filter === 'pending') {
-              pendingTransactionsQuery.refetch();
-            } else {
-              allTransactionsQuery.refetch();
-            }
-            toast.success('Transactions refreshed');
-          }}
-          disabled={loading}
-        >
-          <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchTransactions}
+            disabled={refreshing}
+          >
+            <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={syncTransactions}
+            disabled={refreshing}
+          >
+            <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            Sync from Safe
+          </Button>
+        </div>
       </div>
 
-      {/* Auto-refresh notification for pending transactions */}
-      {filter === 'pending' && (pendingTransactionsQuery.data?.length ?? 0) > 0 && (
+      {/* Manual sync info for pending transactions */}
+      {filter === 'pending' && transactions.length > 0 && (
         <Alert>
           <Clock className="h-4 w-4" />
           <AlertDescription>
-            Auto-refreshing every 10 seconds to detect new signatures from other owners.
-            {' '}Signatures added on app.safe.global will appear here automatically.
+            Click "Sync from Safe" to fetch the latest transactions and signatures from the Safe Transaction Service.
+            {' '}Use "Refresh" to reload from the local database.
           </AlertDescription>
         </Alert>
       )}
@@ -244,8 +281,8 @@ export default function TransactionsPage() {
                   </TableHeader>
                   <TableBody>
                     {filteredTransactions.map((tx: any) => (
-                      <>
-                        <TableRow key={tx.safeTxHash} className="cursor-pointer hover:bg-muted/50">
+                      <React.Fragment key={tx.safeTxHash}>
+                        <TableRow className="cursor-pointer hover:bg-muted/50">
                           <TableCell>
                             <Button
                               variant="ghost"
@@ -361,18 +398,14 @@ export default function TransactionsPage() {
                                   </div>
                                 )}
 
-                                {!tx.isExecuted && isOwner && (
+                                {!tx.isExecuted && isOwnerConnected && (
                                   <div className="pt-2">
                                     <SignTransactionButton 
                                       safeTxHash={tx.safeTxHash}
                                       transaction={tx}
                                       onSuccess={() => {
-                                        // Refetch the appropriate query based on current filter
-                                        if (filter === 'pending') {
-                                          pendingTransactionsQuery.refetch();
-                                        } else {
-                                          allTransactionsQuery.refetch();
-                                        }
+                                        // Refetch transactions after signing
+                                        fetchTransactions();
                                       }} 
                                     />
                                   </div>
@@ -381,7 +414,7 @@ export default function TransactionsPage() {
                             </TableCell>
                           </TableRow>
                         )}
-                      </>
+                      </React.Fragment>
                     ))}
                   </TableBody>
                 </Table>
@@ -403,16 +436,19 @@ function SignTransactionButton({
   onSuccess: () => void;
   transaction: any;
 }) {
-  const { confirmTransaction, isPending, isSuccess, error } = useConfirmTransaction();
-  const { getSignerAddress } = useSafe();
+  const { safeClient, connectedWallet } = useSafe();
   const [isProcessing, setIsProcessing] = useState(false);
   
-  const signerAddress = getSignerAddress();
   const hasSignerSigned = transaction.confirmations?.some(
-    (conf: any) => conf.owner.toLowerCase() === signerAddress?.toLowerCase()
+    (conf: any) => conf.owner.toLowerCase() === connectedWallet?.toLowerCase()
   );
 
   const handleSign = async () => {
+    if (!safeClient) {
+      toast.error('Safe client not initialized');
+      return;
+    }
+
     if (hasSignerSigned) {
       toast.info('You have already signed this transaction');
       return;
@@ -420,7 +456,8 @@ function SignTransactionButton({
 
     setIsProcessing(true);
     try {
-      const result = await confirmTransaction({ safeTxHash });
+      // Use transaction service to confirm
+      const result = await transactionService.confirmTransaction(safeClient, safeTxHash);
       console.log('Confirmation result:', result);
       toast.success('Transaction signed successfully');
       onSuccess();
@@ -443,19 +480,10 @@ function SignTransactionButton({
     );
   }
 
-  const isDisabled = isPending || isSuccess || isProcessing;
-
   return (
-    <div className="space-y-2">
-      <Button onClick={handleSign} disabled={isDisabled}>
-        <PenLine className="mr-2 h-4 w-4" />
-        {isProcessing || isPending ? 'Signing...' : isSuccess ? 'Signed' : 'Sign Transaction'}
-      </Button>
-      {error && (
-        <p className="text-sm text-red-500">
-          Error: {error.message}
-        </p>
-      )}
-    </div>
+    <Button onClick={handleSign} disabled={isProcessing}>
+      <PenLine className="mr-2 h-4 w-4" />
+      {isProcessing ? 'Signing...' : 'Sign Transaction'}
+    </Button>
   );
 }

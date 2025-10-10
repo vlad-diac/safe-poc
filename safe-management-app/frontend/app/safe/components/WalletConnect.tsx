@@ -15,7 +15,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
-import { useSafe } from '@safe-global/safe-react-hooks';
+import { useSafe } from '@/app/providers/SafeProvider';
 
 // Declare window.ethereum for TypeScript
 declare global {
@@ -28,28 +28,44 @@ export function WalletConnect() {
   const { 
     connect, 
     disconnect, 
-    isSignerConnected, 
-    isOwnerConnected,
-    getChain 
+    session,
+    connectedWallet,
+    isConnecting,
+    isOwner,
+    connectWallet,
+    disconnectWallet
   } = useSafe();
   
-  // Track the address in state instead of calling getSignerAddress() which uses hooks internally
-  const [address, setAddress] = useState<string | null>(null);
+  // Local state for UI
   const [copied, setCopied] = useState(false);
   const [networkMismatch, setNetworkMismatch] = useState(false);
   const [walletChainId, setWalletChainId] = useState<number | null>(null);
   
-  const chain = getChain();
-  const expectedChainId = chain?.id;
+  const expectedChainId = session?.chainId;
 
   useEffect(() => {
-    if (isSignerConnected && address) {
+    if (session) {
+      setAutoReconnectChecked(session.autoReconnect);
+    }
+  }, [session?.autoReconnect]);
+
+  useEffect(() => {
+    if (connectedWallet) {
       checkNetworkMatch();
-    } else if (!isSignerConnected) {
-      setAddress(null);
+      
+      // Check if connected wallet is an owner after connection
+      const timer = setTimeout(() => {
+        if (connectedWallet && !isOwner) {
+          console.log('⚠️ Connected wallet is not a Safe owner');
+          toast.warning('Connected wallet is not a Safe owner. You can view but not sign transactions.');
+        }
+      }, 2000); // Wait 2 seconds for ownership verification
+      
+      return () => clearTimeout(timer);
+    } else {
       setNetworkMismatch(false);
     }
-  }, [isSignerConnected, address]);
+  }, [connectedWallet, isOwner]);
 
   const checkNetworkMatch = async () => {
     if (typeof window !== 'undefined' && window.ethereum) {
@@ -60,7 +76,8 @@ export function WalletConnect() {
         
         if (expectedChainId && currentChainId !== expectedChainId) {
           setNetworkMismatch(true);
-          toast.error(`Network mismatch! Please switch to ${chain?.name || 'the correct network'}`);
+          const networkName = expectedChainId === 1 ? 'Mainnet' : `Chain ${expectedChainId}`;
+          toast.error(`Network mismatch! Please switch to ${networkName}`);
         } else {
           setNetworkMismatch(false);
         }
@@ -87,6 +104,53 @@ export function WalletConnect() {
     }
   }, [expectedChainId]);
 
+  // Auto-connect on mount if wallet was previously connected to this session
+  useEffect(() => {
+    const autoConnect = async () => {
+      // Only auto-connect if:
+      // 1. Auto-reconnect is enabled for this session
+      // 2. Session has a connectedWallet saved
+      // 3. Browser has window.ethereum
+      if (!session?.autoReconnect || !connectedWallet || !window.ethereum) {
+        return;
+      }
+
+      try {
+        console.log('🔄 Auto-reconnect enabled - attempting to connect wallet:', connectedWallet);
+        
+        const { BrowserProvider } = await import('ethers');
+        const provider = new BrowserProvider(window.ethereum);
+        
+        // Try to get accounts without prompting (only works if already connected to MetaMask)
+        const accounts = await provider.send('eth_accounts', []);
+        
+        // Check if the saved wallet is in the available accounts
+        const savedWallet = connectedWallet.toLowerCase();
+        const matchingAccount = accounts.find((acc: string) => acc.toLowerCase() === savedWallet);
+        
+        if (matchingAccount) {
+          console.log('✅ Auto-connecting wallet to SafeClient:', matchingAccount);
+          await connect(matchingAccount); // Connect to SafeClient - must await!
+          console.log('✅ Connected to SafeClient');
+          
+          await checkNetworkMatch();
+          toast.success('Wallet reconnected automatically');
+        } else if (accounts.length > 0) {
+          // Saved wallet not available, but other wallets are connected
+          console.log('⚠️ Saved wallet not available, but found other accounts');
+          // Don't auto-connect a different wallet - let user choose
+        } else {
+          // No wallets connected to MetaMask
+          console.log('ℹ️ No wallets connected to browser extension');
+        }
+      } catch (error) {
+        console.error('Auto-connect failed:', error);
+      }
+    };
+    
+    autoConnect();
+  }, [session?.autoReconnect, connectedWallet, connect]); // Run when autoReconnect, connectedWallet changes
+
   const handleConnect = async () => {
     try {
       // Get wallet address from MetaMask first
@@ -99,18 +163,22 @@ export function WalletConnect() {
           // Check network before connecting
           await checkNetworkMatch();
           
-          // connect() requires a signer address parameter
-          connect(accounts[0]);
-          // Set the address in state
-          setAddress(accounts[0]);
+          console.log('🔌 Connecting wallet to SafeClient:', accounts[0]);
+          // Connect to SafeClient (must await for ownership verification)
+          await connect(accounts[0]);
+          console.log('✅ Connected to SafeClient - signer should be set');
+          
+          // Save wallet address and auto-reconnect preference to session
+          await connectWallet(accounts[0], autoReconnectChecked);
+          
           toast.success('Wallet connected successfully');
           
-          // Check if user is an owner
+          // Give a moment to verify ownership
           setTimeout(() => {
-            if (!isOwnerConnected) {
+            if (!isOwner) {
               toast.warning('Connected wallet is not a Safe owner. You can view but not sign transactions.');
             }
-          }, 500);
+          }, 1000);
         }
       } else {
         toast.error('Please install MetaMask to continue');
@@ -122,6 +190,7 @@ export function WalletConnect() {
 
   const handleDisconnect = async () => {
     try {
+      // Disconnect from SafeClient
       await disconnect();
       setAddress(null);
       setNetworkMismatch(false);
@@ -176,8 +245,8 @@ export function WalletConnect() {
                 {address.slice(2, 4).toUpperCase()}
               </AvatarFallback>
             </Avatar>
-            <span className="font-mono text-sm">{truncateAddress(address)}</span>
-            {isOwnerConnected && (
+            <span className="font-mono text-sm">{truncateAddress(connectedWallet)}</span>
+            {isOwner && (
               <Shield className="h-4 w-4 text-green-500" />
             )}
           </Button>
@@ -192,7 +261,7 @@ export function WalletConnect() {
           <DropdownMenuSeparator />
           
           <div className="px-2 py-2">
-            {isOwnerConnected ? (
+            {isOwner ? (
               <Badge variant="default" className="w-full justify-center bg-green-500">
                 <Shield className="mr-1 h-3 w-3" />
                 Safe Owner
@@ -231,7 +300,7 @@ export function WalletConnect() {
               }}
             >
               <AlertTriangle className="mr-2 h-4 w-4 text-yellow-500" />
-              Switch to {chain?.name}
+              Switch to {session?.chainId === 1 ? 'Mainnet' : `Chain ${session?.chainId}`}
             </DropdownMenuItem>
           )}
           
