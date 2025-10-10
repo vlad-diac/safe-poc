@@ -15,3 +15,10 @@ safe-management-app/frontend/out/
 # Docker
 docker/.env
 docker/init-scripts/*.sql
+SAFE_SDK_COMPREHENSIVE_GUIDE.md
+safe-management-app/SAFE_SDK_GUIDE.html
+safe-management-app/SAFE_SDK_GUIDE.md
+safe-management-app/SAFE_SDK_GUIDE.pdf
+safe-management-app/SAFE_SDK_GUIDE.zip
+safe-management-app/WALLET_CONNECTION_GUIDE.md
+safe-management-app/WALLET_CONNECTION_GUIDE.pdf
