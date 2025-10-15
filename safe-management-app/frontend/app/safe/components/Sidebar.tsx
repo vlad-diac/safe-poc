@@ -15,8 +15,8 @@ export function Sidebar({ onSettingsClick }: SidebarProps) {
 
   const navItems = [
     { href: '/safe', label: 'Home', icon: Home },
-    { href: '/safe/transactions', label: 'Transactions', icon: List },
-    { href: '/safe/create', label: 'Create Transaction', icon: Plus },
+    { href: '/safe/transactions', label: 'Tasks', icon: List },
+    { href: '/safe/create', label: 'Create Task', icon: Plus },
     { href: '/safe/payment-links', label: 'Payment Links', icon: Link2 },
     { href: '/safe/settings', label: 'Settings', icon: Settings },
   ];

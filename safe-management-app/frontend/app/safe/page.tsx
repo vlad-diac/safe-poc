@@ -193,7 +193,7 @@ export default function SafeDashboard() {
           </CardContent>
         </Card>
 
-        {/* Pending Transactions Card */}
+        {/* Pending Tasks Card */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Pending</CardTitle>
@@ -206,7 +206,7 @@ export default function SafeDashboard() {
             </p>
             {pendingCount > 0 && (
               <Button variant="link" size="sm" className="p-0 h-auto mt-2" asChild>
-                <Link href="/safe/transactions?filter=pending">
+                <Link href="/safe/transactions?filter=todo">
                   View pending →
                 </Link>
               </Button>
@@ -323,10 +323,10 @@ export default function SafeDashboard() {
 
       {/* Owners Card */}
       <Card>
-        <CardHeader>
-          <CardTitle>Owners ({safeInfo.owners?.length || 0})</CardTitle>
-          <CardDescription>Addresses that can sign transactions</CardDescription>
-        </CardHeader>
+          <CardHeader>
+            <CardTitle>Owners ({safeInfo.owners?.length || 0})</CardTitle>
+            <CardDescription>Addresses that can sign tasks</CardDescription>
+          </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
@@ -388,13 +388,13 @@ export default function SafeDashboard() {
               <CardTitle>Action Required</CardTitle>
             </div>
             <CardDescription>
-              You have {pendingCount} pending transaction{pendingCount !== 1 ? 's' : ''} awaiting signatures
+              You have {pendingCount} pending task{pendingCount !== 1 ? 's' : ''} awaiting signatures
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Button asChild>
-              <Link href="/safe/transactions?filter=pending">
-                Review Pending Transactions
+              <Link href="/safe/transactions?filter=todo">
+                Review Pending Tasks
               </Link>
             </Button>
           </CardContent>

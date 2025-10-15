@@ -6,12 +6,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { 
-  ChevronDown, 
-  ChevronRight, 
   Copy, 
   ExternalLink, 
   Search,
@@ -20,99 +17,96 @@ import {
   Clock,
   XCircle,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  Upload,
+  FileText,
+  Download
 } from 'lucide-react';
 import { useSafe } from '@/app/providers/SafeProvider';
 import { toast } from 'sonner';
 import { formatEther } from 'ethers';
 import { useSearchParams } from 'next/navigation';
 import * as transactionService from '@/lib/services/transactionService';
+import { parseTransactionData, getTransactionSummary, truncateAddress as truncateAddr } from '@/lib/utils/transactionUtils';
 
-export default function TransactionsPage() {
+export default function TasksPage() {
   const { safeClient, isOwner: isOwnerConnected, session } = useSafe();
   const searchParams = useSearchParams();
-  const [filter, setFilter] = useState(searchParams.get('filter') || 'all');
-  const [expandedTx, setExpandedTx] = useState<string | null>(null);
+  const [filter, setFilter] = useState(searchParams.get('filter') || 'todo');
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [allTransactions, setAllTransactions] = useState<any[]>([]);
+  const [allTasks, setAllTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Sync transactions from Safe Transaction Service to database
-  const syncTransactions = async () => {
+  // Sync tasks from Safe Transaction Service to database
+  const syncTasks = async () => {
     if (!session?.id) return;
 
     try {
       setRefreshing(true);
-      toast.info('Syncing transactions from Safe Transaction Service...');
+      toast.info('Syncing tasks from Safe Transaction Service...');
       
       await transactionService.syncTransactions(session.id);
       
-      // Fetch updated transactions
-      await fetchTransactions();
+      // Fetch updated tasks
+      await fetchTasks();
       
-      toast.success('Transactions synced successfully');
+      toast.success('Tasks synced successfully');
     } catch (error) {
-      console.error('Failed to sync transactions:', error);
-      toast.error('Failed to sync transactions');
+      console.error('Failed to sync tasks:', error);
+      toast.error('Failed to sync tasks');
     } finally {
       setRefreshing(false);
     }
   };
 
-  // Fetch transactions from database
-  const fetchTransactions = async () => {
+  // Fetch tasks from database
+  const fetchTasks = async () => {
     if (!session?.id) return;
 
     try {
       setRefreshing(true);
       
-      // Fetch all transactions from database
+      // Fetch all tasks from database
       const all = await transactionService.getAllTransactions(session.id, {
         limit: 100,
       });
       
-      setAllTransactions(all);
+      setAllTasks(all);
       setLoading(false);
     } catch (error) {
-      console.error('Failed to fetch transactions:', error);
-      toast.error('Failed to load transactions');
+      console.error('Failed to fetch tasks:', error);
+      toast.error('Failed to load tasks');
       setLoading(false);
     } finally {
       setRefreshing(false);
     }
   };
 
-  // Load transactions on mount
+  // Load tasks on mount
   useEffect(() => {
     if (session?.id) {
-      fetchTransactions();
+      fetchTasks();
     }
   }, [session?.id]);
 
   // Determine which data to use based on filter
-  const getCurrentTransactions = () => {
-    if (filter === 'pending') {
-      // A transaction is pending if it's not executed and has a confirmations field
-      // This matches the logic in getStatusBadge
-      return allTransactions.filter((tx: any) => {
-        // Must have confirmations field (indicating it's a multisig transaction)
-        // and must not be executed
+  const getCurrentTasks = () => {
+    if (filter === 'todo') {
+      // A task is "to do" if it's not executed and has a confirmations field
+      return allTasks.filter((tx: any) => {
         return tx.confirmations !== undefined && !tx.isExecuted;
       });
+    } else if (filter === 'completed') {
+      return allTasks.filter((tx: any) => tx.isExecuted === true);
     } else if (filter === 'all') {
-      return allTransactions;
-    } else if (filter === 'executed') {
-      return allTransactions.filter((tx: any) => tx.isExecuted === true);
-    } else if (filter === 'failed') {
-      return allTransactions.filter((tx: any) => 
-        tx.isExecuted === false && tx.confirmations?.length > 0
-      );
+      return allTasks;
     }
-    return allTransactions;
+    return allTasks;
   };
 
-  const transactions = getCurrentTransactions();
+  const tasks = getCurrentTasks();
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -123,48 +117,80 @@ export default function TransactionsPage() {
     }
   };
 
-  const truncateAddress = (address: string) => {
-    if (!address) return '';
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
-  };
 
-  const getStatusBadge = (tx: any) => {
+  const getTaskStatus = (tx: any) => {
     if (tx.isExecuted) {
-      return (
-        <Badge variant="default" className="bg-green-500">
-          <CheckCircle2 className="mr-1 h-3 w-3" />
-          Executed
-        </Badge>
-      );
+      return { label: 'Completed', variant: 'default', className: 'bg-green-500', icon: CheckCircle2 };
     }
     
     if (tx.confirmations?.length >= tx.confirmationsRequired) {
-      return (
-        <Badge variant="default" className="bg-blue-500">
-          <AlertCircle className="mr-1 h-3 w-3" />
-          Ready
-        </Badge>
-      );
+      return { label: 'Ready to Execute', variant: 'default', className: 'bg-blue-500', icon: AlertCircle };
     }
     
-    return (
-      <Badge variant="secondary">
-        <Clock className="mr-1 h-3 w-3" />
-        Pending
-      </Badge>
-    );
+    return { label: 'To do', variant: 'secondary', className: 'bg-orange-100 text-orange-800', icon: Clock };
   };
 
-  const filteredTransactions = transactions.filter((tx: any) => {
+  const hasInvoice = (tx: any) => {
+    // Logic to determine if task has an invoice
+    // For now, return false - can be extended with actual invoice tracking
+    return false;
+  };
+
+  const filteredTasks = tasks.filter((tx: any) => {
     if (!searchQuery) return true;
     
     const query = searchQuery.toLowerCase();
+    const txData = parseTransactionData(tx);
     return (
       tx.to?.toLowerCase().includes(query) ||
       tx.safeTxHash?.toLowerCase().includes(query) ||
-      tx.transactionHash?.toLowerCase().includes(query)
+      tx.transactionHash?.toLowerCase().includes(query) ||
+      txData.name.toLowerCase().includes(query)
     );
   });
+
+  // Calculate total amount in USDS (or primary token)
+  const calculateTotal = () => {
+    const total = filteredTasks.reduce((sum, tx) => {
+      const txData = parseTransactionData(tx);
+      if (txData.items.length > 0) {
+        const usdAmount = txData.items.reduce((itemSum, item) => {
+          // Assuming USDC/USDT/DAI can be treated as USDS equivalent
+          if (['USDC', 'USDT', 'DAI', 'USDS'].includes(item.token)) {
+            return itemSum + parseFloat(item.amount);
+          }
+          return itemSum;
+        }, 0);
+        return sum + usdAmount;
+      }
+      return sum;
+    }, 0);
+    return total.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  };
+
+  // Count unique vendors
+  const getVendorCount = () => {
+    const uniqueVendors = new Set(filteredTasks.map(tx => tx.to.toLowerCase()));
+    return uniqueVendors.size;
+  };
+
+  // Generate color for avatar based on address
+  const getAvatarColor = (address: string) => {
+    const colors = [
+      'bg-blue-500',
+      'bg-purple-500',
+      'bg-pink-500',
+      'bg-red-500',
+      'bg-orange-500',
+      'bg-yellow-500',
+      'bg-green-500',
+      'bg-teal-500',
+      'bg-cyan-500',
+      'bg-indigo-500',
+    ];
+    const hash = address.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return colors[hash % colors.length];
+  };
 
   if (loading) {
     return (
@@ -184,40 +210,99 @@ export default function TransactionsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header with Safe Info */}
+      <Card>
+        <CardContent className="py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Avatar className="h-10 w-10 bg-gradient-to-br from-blue-500 to-purple-500">
+                <AvatarFallback className="bg-transparent text-white text-sm font-bold">
+                  SA
+                </AvatarFallback>
+              </Avatar>
+              <div>
+                <h2 className="text-lg font-semibold">Safe Account</h2>
+                <code className="text-xs text-muted-foreground">{truncateAddr(session?.safeAddress || '')}</code>
+              </div>
+            </div>
+            <div className="flex items-center gap-8">
+              <div className="text-right">
+                <div className="text-2xl font-bold">{calculateTotal()}</div>
+                <div className="text-xs text-muted-foreground">TOTAL USDS</div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-bold">{getVendorCount()}</div>
+                <div className="text-xs text-muted-foreground">Vendors</div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Action Bar */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Transactions</h1>
-          <p className="text-muted-foreground">Manage and review your Safe transactions</p>
+        <div className="flex gap-2">
+          <Button
+            variant={filter === 'todo' ? 'default' : 'outline'}
+            onClick={() => setFilter('todo')}
+          >
+            To Do
+          </Button>
+          <Button
+            variant={filter === 'completed' ? 'default' : 'outline'}
+            onClick={() => setFilter('completed')}
+          >
+            Completed
+          </Button>
+          <Button
+            variant={filter === 'all' ? 'default' : 'outline'}
+            onClick={() => setFilter('all')}
+          >
+            All
+          </Button>
         </div>
         <div className="flex gap-2">
           <Button
             variant="outline"
             size="sm"
-            onClick={fetchTransactions}
+            onClick={fetchTasks}
             disabled={refreshing}
           >
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
           <Button
-            variant="default"
+            variant="outline"
             size="sm"
-            onClick={syncTransactions}
+            onClick={syncTasks}
             disabled={refreshing}
           >
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             Sync from Safe
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+          >
+            <PenLine className="mr-2 h-4 w-4" />
+            Add batch payment link
+          </Button>
         </div>
       </div>
 
-      {/* Manual sync info for pending transactions */}
-      {filter === 'pending' && transactions.length > 0 && (
+      {/* Manual sync info */}
+      {filter === 'todo' && tasks.length > 0 && (
         <Alert>
           <Clock className="h-4 w-4" />
           <AlertDescription>
-            Click "Sync from Safe" to fetch the latest transactions and signatures from the Safe Transaction Service.
+            Click "Sync from Safe" to fetch the latest tasks and signatures from the Safe Transaction Service.
             {' '}Use "Refresh" to reload from the local database.
           </AlertDescription>
         </Alert>
@@ -228,7 +313,7 @@ export default function TransactionsPage() {
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by address or hash..."
+            placeholder="Search by vendor name or address..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
@@ -236,210 +321,297 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      {/* Tabs & Table */}
-      <Tabs value={filter} onValueChange={setFilter}>
-        <TabsList>
-          <TabsTrigger value="all">All</TabsTrigger>
-          <TabsTrigger value="pending">Pending</TabsTrigger>
-          <TabsTrigger value="executed">Executed</TabsTrigger>
-        </TabsList>
+      {/* Task Cards */}
+      <Card>
+        <CardContent className="p-0">
+          {filteredTasks.length === 0 ? (
+            <div className="text-center py-12">
+              <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No tasks found</h3>
+              <p className="text-muted-foreground">
+                {searchQuery
+                  ? 'Try adjusting your search query'
+                  : 'Create your first payment task to get started'}
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y">
+              {filteredTasks.map((tx: any) => {
+                const txData = parseTransactionData(tx);
+                const status = getTaskStatus(tx);
+                const isExpanded = expandedTask === tx.safeTxHash;
+                const StatusIcon = status.icon;
+                
+                return (
+                  <div key={tx.safeTxHash} className="hover:bg-muted/30 transition-colors">
+                    {/* Task Card */}
+                    <div className="p-6">
+                      <div className="flex items-start gap-6">
+                        {/* Vendor Info */}
+                        <div className="flex items-center gap-4 flex-1 min-w-0">
+                          <Avatar className={`h-12 w-12 ${getAvatarColor(tx.to)}`}>
+                            <AvatarFallback className="bg-transparent text-white font-bold">
+                              {txData.name.substring(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-semibold text-lg truncate">{txData.name}</h3>
+                            {txData.type === 'batch' && txData.items.length > 0 ? (
+                              <span className="text-sm text-muted-foreground">
+                                {txData.items.length} recipient{txData.items.length !== 1 ? 's' : ''}
+                              </span>
+                            ) : (
+                              <code className="text-sm text-muted-foreground">{truncateAddr(tx.to)}</code>
+                            )}
+                          </div>
+                        </div>
 
-        <TabsContent value={filter} className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                {filter === 'all' && 'All Transactions'}
-                {filter === 'pending' && 'Pending Transactions'}
-                {filter === 'executed' && 'Executed Transactions'}
-              </CardTitle>
-              <CardDescription>
-                {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''} found
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {filteredTransactions.length === 0 ? (
-                <div className="text-center py-12">
-                  <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No transactions found</h3>
-                  <p className="text-muted-foreground">
-                    {searchQuery
-                      ? 'Try adjusting your search query'
-                      : 'Create your first transaction to get started'}
-                  </p>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12"></TableHead>
-                      <TableHead>To</TableHead>
-                      <TableHead>Value</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Confirmations</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredTransactions.map((tx: any) => (
-                      <React.Fragment key={tx.safeTxHash}>
-                        <TableRow className="cursor-pointer hover:bg-muted/50">
-                          <TableCell>
+                        {/* Amount */}
+                        <div className="text-right min-w-[140px]">
+                          <div className="text-xl font-semibold">{getTransactionSummary(tx)}</div>
+                        </div>
+
+                        {/* Status & Actions */}
+                        <div className="flex items-center gap-3 min-w-[300px] justify-end">
+                          <Badge variant={status.variant as any} className={status.className}>
+                            <StatusIcon className="mr-1 h-3 w-3" />
+                            {status.label}
+                          </Badge>
+                          
+                          {!hasInvoice(tx) && !tx.isExecuted && (
+                            <Badge variant="outline" className="bg-yellow-50 text-yellow-800 border-yellow-200">
+                              <FileText className="mr-1 h-3 w-3" />
+                              No invoice
+                            </Badge>
+                          )}
+
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setExpandedTask(isExpanded ? null : tx.safeTxHash)}
+                            className="h-9 w-9 p-0"
+                          >
+                            <PenLine className="h-4 w-4" />
+                          </Button>
+
+                          {hasInvoice(tx) && (
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => setExpandedTx(expandedTx === tx.safeTxHash ? null : tx.safeTxHash)}
-                              className="h-8 w-8 p-0"
+                              className="h-9 w-9 p-0"
                             >
-                              {expandedTx === tx.safeTxHash ? (
-                                <ChevronDown className="h-4 w-4" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4" />
-                              )}
+                              <Upload className="h-4 w-4" />
                             </Button>
-                          </TableCell>
-                          <TableCell>
-                            <code className="text-xs">{truncateAddress(tx.to)}</code>
-                          </TableCell>
-                          <TableCell>
-                            {tx.value ? formatEther(tx.value) : '0'} ETH
-                          </TableCell>
-                          <TableCell>{getStatusBadge(tx)}</TableCell>
-                          <TableCell>
-                            {tx.confirmations?.length || 0} / {tx.confirmationsRequired || 0}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => copyToClipboard(tx.safeTxHash)}
-                                className="h-8 w-8 p-0"
-                              >
-                                <Copy className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                asChild
-                                className="h-8 w-8 p-0"
-                              >
-                                <a
-                                  href={`https://app.safe.global/transactions/tx?safe=eth:${tx.safe}&id=multisig_${tx.safe}_${tx.safeTxHash}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  <ExternalLink className="h-4 w-4" />
-                                </a>
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                        
-                        {/* Expanded Row */}
-                        {expandedTx === tx.safeTxHash && (
-                          <TableRow>
-                            <TableCell colSpan={6} className="bg-muted/50">
-                              <div className="p-4 space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <span className="text-sm font-medium">Safe TX Hash:</span>
-                                    <p className="text-sm font-mono text-muted-foreground break-all">
-                                      {tx.safeTxHash}
-                                    </p>
-                                  </div>
-                                  {tx.transactionHash && (
-                                    <div>
-                                      <span className="text-sm font-medium">TX Hash:</span>
-                                      <p className="text-sm font-mono text-muted-foreground break-all">
-                                        {tx.transactionHash}
-                                      </p>
-                                    </div>
-                                  )}
-                                  <div>
-                                    <span className="text-sm font-medium">Nonce:</span>
-                                    <p className="text-sm text-muted-foreground">{tx.nonce}</p>
-                                  </div>
-                                  <div>
-                                    <span className="text-sm font-medium">Operation:</span>
-                                    <p className="text-sm text-muted-foreground">
-                                      {tx.operation === 0 ? 'Call' : 'DelegateCall'}
-                                    </p>
-                                  </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Batch Transaction Items - Show in main card */}
+                      {txData.type === 'batch' && txData.items.length > 0 && (
+                        <div className="mt-4 ml-16 space-y-2">
+                          {txData.items.map((item, idx) => (
+                            <div key={idx} className="flex items-center justify-between bg-muted/50 p-3 rounded-lg">
+                              <div className="flex items-center gap-3">
+                                <Badge variant="outline" className="font-mono text-xs h-6 w-6 flex items-center justify-center p-0">
+                                  {idx + 1}
+                                </Badge>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm text-muted-foreground">To:</span>
+                                  <code className="text-xs font-medium">{truncateAddr(item.to)}</code>
                                 </div>
+                              </div>
+                              <div className="font-mono font-semibold">
+                                {item.amount} {item.token}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
-                                {tx.data && tx.data !== '0x' && (
-                                  <div>
-                                    <span className="text-sm font-medium">Data:</span>
-                                    <pre className="text-xs font-mono bg-background p-2 rounded mt-1 overflow-x-auto">
-                                      {tx.data}
-                                    </pre>
-                                  </div>
-                                )}
+                      {/* Additional Info Row */}
+                      <div className="mt-4 flex items-center gap-6 text-sm text-muted-foreground ml-16">
+                        <div className="flex items-center gap-2">
+                          <span>Nonce: {tx.nonce}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span>Confirmations: {tx.confirmations?.length || 0}/{tx.confirmationsRequired || 0}</span>
+                        </div>
+                        {tx.submissionDate && (
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-3 w-3" />
+                            <span>
+                              {new Date(tx.submissionDate).toLocaleDateString('en-US', { 
+                                month: 'short', 
+                                day: 'numeric',
+                                year: 'numeric'
+                              })}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => copyToClipboard(tx.safeTxHash)}
+                            className="h-7 px-2 text-xs"
+                          >
+                            <Copy className="h-3 w-3 mr-1" />
+                            Copy Hash
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            asChild
+                            className="h-7 px-2 text-xs"
+                          >
+                            <a
+                              href={`https://app.safe.global/transactions/tx?safe=eth:${tx.safe}&id=multisig_${tx.safe}_${tx.safeTxHash}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <ExternalLink className="h-3 w-3 mr-1" />
+                              View in Safe
+                            </a>
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
 
-                                {tx.confirmations && tx.confirmations.length > 0 && (
-                                  <div>
-                                    <span className="text-sm font-medium">Signatures:</span>
-                                    <div className="mt-2 space-y-2">
-                                      {tx.confirmations.map((conf: any) => (
-                                        <div key={conf.owner} className="flex items-center gap-2 text-sm">
-                                          <CheckCircle2 className="h-4 w-4 text-green-500" />
-                                          <code className="text-xs">{truncateAddress(conf.owner)}</code>
+                    {/* Expanded Details */}
+                    {isExpanded && (
+                      <div className="px-6 pb-6 pt-2 bg-muted/20 border-t">
+                        <div className="space-y-4">
+                          {/* Task Items - Only show for non-batch or when items are not already displayed */}
+                          {txData.items.length > 0 && txData.type !== 'batch' && (
+                            <div>
+                              <span className="text-sm font-medium mb-2 block">Payment Details:</span>
+                              <div className="space-y-2">
+                                {txData.items.map((item, idx) => (
+                                  <div key={idx} className="flex items-center justify-between bg-background p-3 rounded border">
+                                    <div className="flex items-center gap-3">
+                                      <div>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm text-muted-foreground">To:</span>
+                                          <code className="text-xs">{truncateAddr(item.to)}</code>
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => copyToClipboard(conf.owner)}
+                                            onClick={() => copyToClipboard(item.to)}
                                             className="h-6 w-6 p-0"
                                           >
                                             <Copy className="h-3 w-3" />
                                           </Button>
                                         </div>
-                                      ))}
+                                      </div>
+                                    </div>
+                                    <div className="font-mono font-medium">
+                                      {item.amount} {item.token}
                                     </div>
                                   </div>
-                                )}
-
-                                {!tx.isExecuted && isOwnerConnected && (
-                                  <div className="pt-2">
-                                    <SignTransactionButton 
-                                      safeTxHash={tx.safeTxHash}
-                                      transaction={tx}
-                                      onSuccess={() => {
-                                        // Refetch transactions after signing
-                                        fetchTransactions();
-                                      }} 
-                                    />
-                                  </div>
-                                )}
+                                ))}
                               </div>
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </React.Fragment>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <span className="text-sm font-medium">Safe TX Hash:</span>
+                              <div className="flex items-center gap-2 mt-1">
+                                <p className="text-sm font-mono text-muted-foreground break-all">
+                                  {truncateAddr(tx.safeTxHash)}
+                                </p>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => copyToClipboard(tx.safeTxHash)}
+                                  className="h-6 w-6 p-0 flex-shrink-0"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  asChild
+                                  className="h-6 w-6 p-0 flex-shrink-0"
+                                >
+                                  <a
+                                    href={`https://app.safe.global/transactions/tx?safe=eth:${tx.safe}&id=multisig_${tx.safe}_${tx.safeTxHash}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    <ExternalLink className="h-3 w-3" />
+                                  </a>
+                                </Button>
+                              </div>
+                            </div>
+                            <div>
+                              <span className="text-sm font-medium">Confirmations:</span>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                {tx.confirmations?.length || 0} / {tx.confirmationsRequired || 0} signatures
+                              </p>
+                            </div>
+                          </div>
+
+                          {tx.confirmations && tx.confirmations.length > 0 && (
+                            <div>
+                              <span className="text-sm font-medium">Signatures:</span>
+                              <div className="mt-2 space-y-2">
+                                {tx.confirmations.map((conf: any) => (
+                                  <div key={conf.owner} className="flex items-center gap-2 text-sm">
+                                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                    <code className="text-xs">{truncateAddr(conf.owner)}</code>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => copyToClipboard(conf.owner)}
+                                      className="h-6 w-6 p-0"
+                                    >
+                                      <Copy className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {!tx.isExecuted && isOwnerConnected && (
+                            <div className="pt-2">
+                              <SignTaskButton 
+                                safeTxHash={tx.safeTxHash}
+                                task={tx}
+                                onSuccess={() => {
+                                  fetchTasks();
+                                }} 
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
-function SignTransactionButton({ 
+function SignTaskButton({ 
   safeTxHash, 
   onSuccess,
-  transaction 
+  task 
 }: { 
   safeTxHash: string; 
   onSuccess: () => void;
-  transaction: any;
+  task: any;
 }) {
   const { safeClient, connectedWallet } = useSafe();
   const [isProcessing, setIsProcessing] = useState(false);
   
-  const hasSignerSigned = transaction.confirmations?.some(
+  const hasSignerSigned = task.confirmations?.some(
     (conf: any) => conf.owner.toLowerCase() === connectedWallet?.toLowerCase()
   );
 
@@ -450,7 +622,7 @@ function SignTransactionButton({
     }
 
     if (hasSignerSigned) {
-      toast.info('You have already signed this transaction');
+      toast.info('You have already signed this task');
       return;
     }
 
@@ -459,11 +631,11 @@ function SignTransactionButton({
       // Use transaction service to confirm
       const result = await transactionService.confirmTransaction(safeClient, safeTxHash);
       console.log('Confirmation result:', result);
-      toast.success('Transaction signed successfully');
+      toast.success('Task signed successfully');
       onSuccess();
     } catch (error: any) {
-      console.error('Sign transaction error:', error);
-      const errorMessage = error?.message || error?.reason || 'Failed to sign transaction';
+      console.error('Sign task error:', error);
+      const errorMessage = error?.message || error?.reason || 'Failed to sign task';
       toast.error(errorMessage);
     } finally {
       setIsProcessing(false);
@@ -483,7 +655,7 @@ function SignTransactionButton({
   return (
     <Button onClick={handleSign} disabled={isProcessing}>
       <PenLine className="mr-2 h-4 w-4" />
-      {isProcessing ? 'Signing...' : 'Sign Transaction'}
+      {isProcessing ? 'Signing...' : 'Sign Task'}
     </Button>
   );
 }

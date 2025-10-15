@@ -228,11 +228,18 @@ async function syncTransactions(sessionId) {
     });
 
     console.log(`✅ Transaction sync completed: ${syncedCount} synced/updated`);
+    
+    // Verify transactions were saved
+    const dbCount = await prisma.transaction.count({
+      where: { sessionId: session.id }
+    });
+    console.log(`📊 Database now contains ${dbCount} transactions for this session`);
 
     return {
       success: true,
       syncedCount,
       totalFetched: transactions.length,
+      dbCount,
     };
   } catch (error) {
     console.error('❌ Transaction sync failed:', error);
@@ -261,6 +268,8 @@ async function getTransactions(sessionId, options = {}) {
     where.isExecuted = true;
   }
 
+  console.log(`📋 Fetching transactions for sessionId: ${sessionId}, filters:`, { pending, executed });
+
   const transactions = await prisma.transaction.findMany({
     where,
     orderBy: [
@@ -273,6 +282,8 @@ async function getTransactions(sessionId, options = {}) {
   });
 
   const total = await prisma.transaction.count({ where });
+
+  console.log(`📊 Found ${transactions.length} transactions (total: ${total}) for session ${sessionId}`);
 
   return {
     results: transactions,
