@@ -30,7 +30,7 @@ async function getDefaultSession() {
 
 // Create a new session
 async function createSession(data) {
-  const { name, safeAddress, apiKey, chainId, rpcUrl, transactionServiceUrl, isDefault, userId } = data;
+  const { name, safeAddress, apiKey, chainId, transactionServiceUrl, isDefault, userId } = data;
   
   // Auto-generate name if not provided
   const sessionName = name || generateSessionName(safeAddress, chainId);
@@ -47,9 +47,8 @@ async function createSession(data) {
     data: {
       name: sessionName,
       safeAddress,
-      apiKey,
+      apiKey, // Can be null - will use company key as fallback
       chainId,
-      rpcUrl,
       transactionServiceUrl,
       isDefault: isDefault || false,
       userId
@@ -64,7 +63,6 @@ async function updateSession(id, data) {
     safeAddress, 
     apiKey, 
     chainId, 
-    rpcUrl, 
     transactionServiceUrl, 
     isDefault,
     totalAssetValueUsd,
@@ -85,9 +83,8 @@ async function updateSession(id, data) {
     data: {
       ...(name && { name }),
       ...(safeAddress && { safeAddress }),
-      ...(apiKey && { apiKey }),
+      ...(apiKey !== undefined && { apiKey }), // Allow null to use company key
       ...(chainId && { chainId }),
-      ...(rpcUrl && { rpcUrl }),
       ...(transactionServiceUrl && { transactionServiceUrl }),
       ...(isDefault !== undefined && { isDefault }),
       ...(totalAssetValueUsd !== undefined && { totalAssetValueUsd }),
@@ -169,15 +166,14 @@ async function createDefaultSessionFromEnv() {
   const defaultSessionData = {
     name: 'Default Session',
     safeAddress: process.env.DEFAULT_SAFE_ADDRESS,
-    apiKey: process.env.SAFE_API_KEY,
+    apiKey: process.env.SAFE_API_KEY || null, // Optional - will use company key
     chainId: parseInt(process.env.CHAIN_ID),
-    rpcUrl: process.env.RPC_URL,
     transactionServiceUrl: process.env.TRANSACTION_SERVICE_URL,
     isDefault: true
   };
   
-  // Only create if all required env vars are present
-  if (defaultSessionData.safeAddress && defaultSessionData.apiKey && defaultSessionData.rpcUrl) {
+  // Only create if required env vars are present (rpcUrl no longer required)
+  if (defaultSessionData.safeAddress && defaultSessionData.transactionServiceUrl) {
     return await createSession(defaultSessionData);
   }
   

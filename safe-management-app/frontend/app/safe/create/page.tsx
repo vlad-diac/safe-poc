@@ -6,27 +6,52 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Send, Loader2, CheckCircle2, AlertTriangle, Wallet } from 'lucide-react';
+import { Send, Loader2, CheckCircle2, AlertTriangle, Wallet, X } from 'lucide-react';
 import { useSafe } from '@/app/providers/SafeProvider';
 import { toast } from 'sonner';
 import { parseEther } from 'ethers';
 import { useRouter } from 'next/navigation';
-import * as transactionService from '@/lib/services/transactionService';
+
+interface Recipient {
+  address: string;
+  amount: string;
+  data?: string;
+}
+
+/**
+ * Adjust personal_sign signature for Safe Transaction Service
+ * Safe needs v value adjusted to indicate eth_signed_message format
+ */
+function adjustPersonalSignatureForSafe(signature: string): string {
+  // Signature is in format: 0x + r (64 chars) + s (64 chars) + v (2 chars)
+  const r = signature.slice(0, 66); // 0x + 64 chars
+  const s = '0x' + signature.slice(66, 130); // 64 chars
+  let v = parseInt(signature.slice(130, 132), 16); // last 2 chars
+
+  // Adjust v value for personal_sign: add 4 to indicate eth_signed_message
+  // This tells Safe that the signature used the Ethereum Signed Message prefix
+  if (v < 27) {
+    v += 27;
+  }
+  v += 4; // Add 4 to indicate personal_sign / eth_signed_message format
+
+  // Reconstruct signature
+  const adjustedV = v.toString(16).padStart(2, '0');
+  return r + s.slice(2) + adjustedV;
+}
 
 export default function CreateTransactionPage() {
   const router = useRouter();
-  const [formData, setFormData] = useState({
-    to: '',
-    value: '',
-    data: '0x',
-    operation: '0',
-  });
+  const [recipients, setRecipients] = useState<Recipient[]>([
+    { address: '', amount: '', data: '0x' }
+  ]);
+  const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [checkingOwnership, setCheckingOwnership] = useState(true);
 
   // Get Safe context
-  const { safeClient, connectedWallet, isOwner } = useSafe();
+  const { safeClient, connectedWallet, isOwner, session } = useSafe();
 
   // Debug connection status
   useEffect(() => {
@@ -58,51 +83,105 @@ export default function CreateTransactionPage() {
     console.log('🚀 Form submitted!', {
       connectedWallet,
       isOwner,
-      formData
+      recipients
     });
     
     try {
       setSubmitting(true);
 
-      // Validate address
-      if (!formData.to || !formData.to.match(/^0x[a-fA-F0-9]{40}$/)) {
-        toast.error('Invalid recipient address');
-        return;
+      // Validate all recipients
+      for (let i = 0; i < recipients.length; i++) {
+        const recipient = recipients[i];
+        
+        if (!recipient.address || !recipient.address.match(/^0x[a-fA-F0-9]{40}$/)) {
+          toast.error(`Invalid address for recipient ${i + 1}`);
+          return;
+        }
+
+        if (!recipient.amount || isNaN(parseFloat(recipient.amount))) {
+          toast.error(`Invalid amount for recipient ${i + 1}`);
+          return;
+        }
       }
 
-      // Validate value
-      if (!formData.value || isNaN(parseFloat(formData.value))) {
-        toast.error('Invalid ETH value');
-        return;
+      // Prepare recipients for backend
+      const recipientsData = recipients.map(r => ({
+        address: r.address,
+        amount: parseEther(r.amount).toString(),
+        data: r.data || '0x',
+        operation: 0, // CALL operation
+      }));
+
+      console.log('📤 Starting backend-heavy transaction flow...');
+      
+      // Step 1: Backend creates transaction
+      console.log('1️⃣ Creating transaction on backend...');
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      const createResponse = await fetch(`${apiUrl}/api/batch-transactions/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          sessionId: session?.id,
+          recipients: recipientsData,
+          description: description || `Batch payment to ${recipientsData.length} recipient(s)`
+        })
+      });
+
+      if (!createResponse.ok) {
+        const error = await createResponse.json();
+        throw new Error(error.details || 'Failed to create transaction');
       }
 
-      // Prepare transaction using service format
-      const transactions: transactionService.TransactionData[] = [{
-        to: formData.to,
-        value: parseEther(formData.value).toString(),
-        data: formData.data || '0x',
-      }];
+      const { safeTxHash, draftId } = await createResponse.json();
+      console.log('✅ Transaction created:', safeTxHash);
 
-      console.log('📤 Sending transaction via transactionService...');
+      // Step 2: Frontend signs with personal_sign (works with default MetaMask settings!)
+      console.log('2️⃣ Signing transaction hash with personal_sign...');
+      console.log('📝 This works with default MetaMask settings - no configuration needed!');
       
-      // Use transaction service - this will prompt MetaMask for signing
-      const result = await transactionService.sendTransaction(safeClient, { transactions });
+      // Use personal_sign (enabled by default in MetaMask)
+      let signature = await window.ethereum.request({
+        method: 'personal_sign',
+        params: [safeTxHash, connectedWallet]
+      }) as string;
       
-      console.log('✅ Transaction sent!', result);
+      console.log('✅ Personal signature received:', signature);
       
-      // Extract safe transaction hash from result
-      const safeTxHash = result.safeTxHash || result.ethereumTxHash || '';
+      // Adjust signature for Safe: personal_sign adds a prefix, so we need to adjust the v value
+      // Safe expects v >= 27. When using personal_sign, add 4 to v to indicate eth_signed_message
+      const adjustedSignature = adjustPersonalSignatureForSafe(signature);
+      console.log('✅ Signature adjusted for Safe:', adjustedSignature);
+      
+      const finalSignature = adjustedSignature;
+
+      // Step 3: Backend proposes transaction to Safe Transaction Service
+      console.log('3️⃣ Proposing transaction to Safe...');
+      const proposeResponse = await fetch(`${apiUrl}/api/batch-transactions/propose`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          draftId,
+          senderAddress: connectedWallet,
+          senderSignature: finalSignature
+        })
+      });
+
+      if (!proposeResponse.ok) {
+        const error = await proposeResponse.json();
+        throw new Error(error.details || 'Failed to propose transaction');
+      }
+
+      const result = await proposeResponse.json();
+      console.log('✅ Transaction proposed successfully!', result);
+      
       setTxHash(safeTxHash);
-      
       toast.success('Transaction created successfully!');
       
       // Reset form
-      setFormData({
-        to: '',
-        value: '',
-        data: '0x',
-        operation: '0',
-      });
+      setRecipients([{ address: '', amount: '', data: '0x' }]);
+      setDescription('');
 
     } catch (error: any) {
       console.error('❌ Failed to create transaction:', error);
@@ -111,7 +190,19 @@ export default function CreateTransactionPage() {
         code: error?.code,
         data: error?.data,
       });
-      toast.error(error?.message || 'Failed to create transaction');
+      
+      // Check if it's an eth_sign disabled error
+      if (error?.code === -32601 || error?.message?.includes('does not exist')) {
+        toast.error(
+          'eth_sign is disabled in MetaMask. Please enable it:\n' +
+          '1. Open MetaMask > Settings > Advanced\n' +
+          '2. Enable "Eth_sign requests"\n' +
+          '3. Try again',
+          { duration: 10000 }
+        );
+      } else {
+        toast.error(error?.message || 'Failed to create transaction');
+      }
     } finally {
       console.log('🏁 Finally block - resetting submitting state');
       setSubmitting(false);
@@ -151,7 +242,7 @@ export default function CreateTransactionPage() {
                 asChild
               >
                 <a
-                  href={`https://app.safe.global/transactions/queue?safe=eth:${formData.to}`}
+                  href={`https://app.safe.global/transactions/queue?safe=eth:${session?.safeAddress}`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -203,75 +294,92 @@ export default function CreateTransactionPage() {
               Fill in the details for your new transaction
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {/* To Address */}
+          <CardContent className="space-y-6">
+            {/* Description */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">
-                Recipient Address <span className="text-destructive">*</span>
-              </label>
+              <label className="text-sm font-medium">Description (Optional)</label>
               <Input
-                placeholder="0x..."
-                value={formData.to}
-                onChange={(e) => setFormData({ ...formData, to: e.target.value })}
-                required
-                pattern="^0x[a-fA-F0-9]{40}$"
+                placeholder="e.g., Monthly team payments"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                The Ethereum address that will receive the transaction
+                Optional description for this transaction batch
               </p>
             </div>
 
-            {/* Value */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">
-                Value (ETH) <span className="text-destructive">*</span>
-              </label>
-              <Input
-                type="number"
-                step="0.000000000000000001"
-                placeholder="0.0"
-                value={formData.value}
-                onChange={(e) => setFormData({ ...formData, value: e.target.value })}
-                required
-                min="0"
-              />
-              <p className="text-xs text-muted-foreground">
-                Amount of ETH to send (e.g., 0.1)
-              </p>
-            </div>
+            {/* Recipients */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">
+                  Recipients ({recipients.length})
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRecipients([...recipients, { address: '', amount: '', data: '0x' }])}
+                >
+                  + Add Recipient
+                </Button>
+              </div>
 
-            {/* Data */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Data (Optional)</label>
-              <Input
-                placeholder="0x"
-                value={formData.data}
-                onChange={(e) => setFormData({ ...formData, data: e.target.value })}
-                className="font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                Hex-encoded contract interaction data (leave as 0x for simple transfers)
-              </p>
-            </div>
+              {recipients.map((recipient, index) => (
+                <Card key={index} className="p-4 space-y-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium">Recipient {index + 1}</span>
+                    {recipients.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setRecipients(recipients.filter((_, i) => i !== index))}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </div>
 
-            {/* Operation Type */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Operation Type</label>
-              <Select 
-                value={formData.operation} 
-                onValueChange={(value) => setFormData({ ...formData, operation: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="0">Call</SelectItem>
-                  <SelectItem value="1">DelegateCall</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Use "Call" for standard transactions, "DelegateCall" for advanced use cases
-              </p>
+                  {/* Address */}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      Address <span className="text-destructive">*</span>
+                    </label>
+                    <Input
+                      placeholder="0x..."
+                      value={recipient.address}
+                      onChange={(e) => {
+                        const newRecipients = [...recipients];
+                        newRecipients[index].address = e.target.value;
+                        setRecipients(newRecipients);
+                      }}
+                      required
+                      pattern="^0x[a-fA-F0-9]{40}$"
+                    />
+                  </div>
+
+                  {/* Amount */}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      Amount (ETH) <span className="text-destructive">*</span>
+                    </label>
+                    <Input
+                      type="number"
+                      step="0.000000000000000001"
+                      placeholder="0.0"
+                      value={recipient.amount}
+                      onChange={(e) => {
+                        const newRecipients = [...recipients];
+                        newRecipients[index].amount = e.target.value;
+                        setRecipients(newRecipients);
+                      }}
+                      required
+                      min="0"
+                    />
+                  </div>
+                </Card>
+              ))}
             </div>
 
             {/* Submit Button */}

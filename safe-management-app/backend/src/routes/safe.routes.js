@@ -3,6 +3,10 @@ const router = express.Router();
 const { getSessionById, updateSession } = require('../services/sessionService');
 const { createSafeService } = require('../services/safeService');
 const priceService = require('../services/priceService');
+const protocolKitService = require('../services/protocolKitService');
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
 
 // Middleware to load session and create Safe service
 async function loadSafeService(req, res, next) {
@@ -26,7 +30,53 @@ async function loadSafeService(req, res, next) {
   }
 }
 
-// Get Safe info
+/**
+ * GET /api/safe/:address/info
+ * Get Safe information using Protocol Kit
+ */
+router.get('/:address/info', async (req, res) => {
+  try {
+    const { address } = req.params;
+    const { sessionId } = req.query;
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Session ID required' });
+    }
+
+    const session = await prisma.safeSession.findUnique({
+      where: { id: sessionId }
+    });
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Get Safe info using Protocol Kit
+    const safeInfo = await protocolKitService.getSafeInfo(session);
+
+    // Update session cache
+    await prisma.safeSession.update({
+      where: { id: sessionId },
+      data: {
+        // Store owners as JSON if needed
+        // owners: JSON.stringify(safeInfo.owners),
+        // threshold: safeInfo.threshold,
+        // nonce: safeInfo.nonce
+      }
+    });
+
+    res.json(safeInfo);
+
+  } catch (error) {
+    console.error('Get Safe info error:', error);
+    res.status(500).json({
+      error: 'Failed to get Safe info',
+      details: error.message
+    });
+  }
+});
+
+// Get Safe info (legacy endpoint)
 router.get('/:sessionId/info', loadSafeService, async (req, res) => {
   try {
     const info = await req.safeService.getSafeInfo();

@@ -1,68 +1,157 @@
 /**
  * Transaction Service
  * 
- * Centralized service for Safe transaction operations using SDK Starter Kit.
- * Handles creating, signing, and managing Safe transactions.
+ * Backend-heavy transaction service.
+ * Frontend only handles wallet signing - backend handles all SDK operations.
  */
 
 import { SafeClient } from '@safe-global/sdk-starter-kit';
 
-export interface TransactionData {
-  to: string;
-  value: string;
-  data?: string;
-  operation?: number;
-}
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
-export interface SendTransactionParams {
-  transactions: TransactionData[];
-}
-
-export interface TransactionResult {
-  safeTxHash?: string;
-  ethereumTxHash?: string;
+/**
+ * Check if MetaMask is unlocked
+ */
+async function isMetaMaskUnlocked(): Promise<boolean> {
+  if (!window.ethereum) return false;
+  
+  try {
+    const accounts = await window.ethereum.request({ 
+      method: 'eth_accounts' 
+    });
+    return accounts && accounts.length > 0;
+  } catch (error) {
+    return false;
+  }
 }
 
 /**
- * Send a transaction (create proposal or execute if threshold is 1)
- * This will prompt MetaMask for signing
+ * Sign transaction hash with user's wallet
+ * This is the ONLY operation that stays on frontend
  */
-export async function sendTransaction(
-  client: SafeClient,
-  params: SendTransactionParams
-): Promise<TransactionResult> {
-  console.log('📤 [TransactionService] Sending transaction...', params);
-  
-  // Ensure data field has a default value
-  const normalizedParams = {
-    transactions: params.transactions.map(tx => ({
-      ...tx,
-      data: tx.data || '0x',
-      operation: tx.operation || 0
-    }))
-  };
-  
-  const result = await client.send(normalizedParams);
-  
-  console.log('✅ [TransactionService] Transaction sent:', result);
-  
-  return {
-    safeTxHash: result.transactions?.safeTxHash,
-    ethereumTxHash: result.transactions?.ethereumTxHash,
-  };
+export async function signTransactionHash(
+  walletAddress: string,
+  safeTxHash: string
+): Promise<string> {
+  console.log('✍️ [Frontend] Signing transaction hash...');
+
+  if (!window.ethereum) {
+    throw new Error('No wallet provider found');
+  }
+
+  // Check if MetaMask is unlocked
+  const isUnlocked = await isMetaMaskUnlocked();
+  if (!isUnlocked) {
+    throw new Error('Please unlock MetaMask and try again');
+  }
+
+  // Use eth_sign for Safe transaction signatures
+  // Note: You may need to enable eth_sign in MetaMask (Settings > Advanced > Enable eth_sign)
+  try {
+    console.log('📝 Requesting signature from MetaMask...');
+    
+    const signature = await Promise.race([
+      window.ethereum.request({
+        method: 'eth_sign',
+        params: [walletAddress, safeTxHash],
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Signature request timed out after 60 seconds')), 60000)
+      )
+    ]) as string;
+
+    console.log('✅ [Frontend] Transaction hash signed');
+    console.log('Signature:', signature);
+    return signature;
+  } catch (error: any) {
+    console.error('Failed to sign hash:', error);
+    
+    if (error.code === 4001) {
+      throw new Error('Signature rejected by user');
+    }
+    
+    if (error.code === -32601 || error.message?.includes('does not exist')) {
+      throw new Error(
+        'eth_sign is disabled in MetaMask. Please enable it:\n' +
+        '1. Open MetaMask\n' +
+        '2. Go to Settings > Advanced\n' +
+        '3. Enable "Eth_sign requests"\n' +
+        '4. Try again'
+      );
+    }
+    
+    if (error.message?.includes('timeout')) {
+      throw new Error('Signature request timed out. Please check MetaMask.');
+    }
+    
+    throw error;
+  }
 }
 
 /**
- * Get all pending transactions
+ * Get pending transactions (from backend)
  */
-export async function getPendingTransactions(client: SafeClient) {
-  console.log('📋 [TransactionService] Fetching pending transactions...');
-  
-  const result = await client.getPendingTransactions();
-  
-  console.log('✅ [TransactionService] Fetched pending transactions:', result.results?.length || 0);
-  
-  return result.results || [];
+export async function getPendingTransactions(sessionId: string) {
+  const response = await fetch(`${API_URL}/api/transactions/${sessionId}?pending=true`, {
+    credentials: 'include'
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to get pending transactions');
+  }
+
+  const data = await response.json();
+  return data.results || [];
+}
+
+/**
+ * Get all transactions (from backend)
+ */
+export async function getAllTransactions(sessionId: string) {
+  const response = await fetch(`${API_URL}/api/transactions/${sessionId}`, {
+    credentials: 'include'
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to get transactions');
+  }
+
+  const data = await response.json();
+  return data.results || [];
+}
+
+/**
+ * Confirm transaction (sign + send to backend)
+ */
+export async function confirmTransaction(
+  walletAddress: string,
+  sessionId: string,
+  safeTxHash: string
+) {
+  console.log('✍️ [TransactionService] Confirming transaction...');
+
+  // Sign on frontend
+  const signature = await signTransactionHash(walletAddress, safeTxHash);
+
+  // Send to backend
+  const response = await fetch(`${API_URL}/api/transactions/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      sessionId,
+      safeTxHash,
+      signature
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to confirm transaction');
+  }
+
+  console.log('✅ [TransactionService] Transaction confirmed');
+
+  return await response.json();
 }
 
 /**
@@ -71,8 +160,9 @@ export async function getPendingTransactions(client: SafeClient) {
 export async function syncTransactions(sessionId: string) {
   console.log('🔄 [TransactionService] Syncing transactions to database...');
   
-  const response = await fetch(`http://localhost:5000/api/transactions/${sessionId}/sync`, {
+  const response = await fetch(`${API_URL}/api/transactions/${sessionId}/sync`, {
     method: 'POST',
+    credentials: 'include'
   });
   
   if (!response.ok) {
@@ -86,97 +176,18 @@ export async function syncTransactions(sessionId: string) {
 }
 
 /**
- * Get all transactions from database
- * This fetches transactions that have been synced to the database
- */
-export async function getAllTransactions(
-  sessionId: string,
-  options?: {
-    limit?: number;
-    offset?: number;
-    pending?: boolean;
-    executed?: boolean;
-  }
-) {
-  console.log('📋 [TransactionService] Fetching all transactions from database...');
-  
-  try {
-    const params = new URLSearchParams();
-    if (options?.limit) params.append('limit', options.limit.toString());
-    if (options?.offset) params.append('offset', options.offset.toString());
-    if (options?.pending) params.append('pending', 'true');
-    if (options?.executed) params.append('executed', 'true');
-    
-    const url = `http://localhost:5000/api/transactions/${sessionId}?${params.toString()}`;
-    console.log('📋 [TransactionService] Fetching from:', url);
-    
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch transactions: ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    console.log('✅ [TransactionService] Fetched all transactions:', data.results?.length || 0);
-    
-    return data.results || [];
-  } catch (error) {
-    console.error('Failed to fetch all transactions:', error);
-    throw error;
-  }
-}
-
-/**
  * Get sync status
  */
 export async function getSyncStatus(sessionId: string) {
-  const response = await fetch(`http://localhost:5000/api/transactions/${sessionId}/sync/status`);
+  const response = await fetch(`${API_URL}/api/transactions/${sessionId}/sync/status`, {
+    credentials: 'include'
+  });
   
   if (!response.ok) {
     throw new Error(`Failed to get sync status: ${response.statusText}`);
   }
   
   return await response.json();
-}
-
-/**
- * Confirm/sign a pending transaction
- * This will prompt MetaMask for signing
- */
-export async function confirmTransaction(
-  client: SafeClient,
-  safeTxHash: string
-): Promise<TransactionResult> {
-  console.log('✍️ [TransactionService] Confirming transaction:', safeTxHash);
-  
-  const result = await client.confirm({ safeTxHash });
-  
-  console.log('✅ [TransactionService] Transaction confirmed:', result);
-  
-  return {
-    safeTxHash: result.transactions?.safeTxHash,
-    ethereumTxHash: result.transactions?.ethereumTxHash,
-  };
-}
-
-/**
- * Get transaction details by hash
- */
-export async function getTransaction(client: SafeClient, safeTxHash: string) {
-  console.log('🔍 [TransactionService] Fetching transaction:', safeTxHash);
-  
-  // SafeClient doesn't have a getTransaction method directly
-  // We need to fetch from pending transactions
-  const pending = await client.getPendingTransactions();
-  const transaction = pending.results?.find(
-    (tx: any) => tx.safeTxHash === safeTxHash
-  );
-  
-  if (!transaction) {
-    throw new Error(`Transaction not found: ${safeTxHash}`);
-  }
-  
-  return transaction;
 }
 
 /**

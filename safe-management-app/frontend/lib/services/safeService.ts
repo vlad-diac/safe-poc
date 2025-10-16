@@ -38,58 +38,105 @@ export interface TokenBalance {
 }
 
 /**
- * Get comprehensive Safe account information
+ * Get comprehensive Safe account information from backend
  */
-export async function getSafeInfo(client: SafeClient): Promise<SafeInfo> {
+export async function getSafeInfo(sessionIdOrClient: string | SafeClient): Promise<SafeInfo> {
   console.log('[SafeService] Fetching Safe info...');
   
-  const [address, owners, threshold, nonce] = await Promise.all([
-    client.getAddress(),
-    client.getOwners(),
-    client.getThreshold(),
-    client.getNonce(),
-  ]);
+  // If it's a SafeClient (old approach), get session from localStorage
+  const sessionId = typeof sessionIdOrClient === 'string' 
+    ? sessionIdOrClient 
+    : localStorage.getItem('safe_active_session_id');
+  
+  if (!sessionId) {
+    throw new Error('No active session found');
+  }
+  
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+  
+  // First get session to get Safe address
+  const sessionResponse = await fetch(`${apiUrl}/api/sessions/${sessionId}`, {
+    credentials: 'include'
+  });
+  
+  if (!sessionResponse.ok) {
+    throw new Error('Failed to fetch session');
+  }
+  
+  const session = await sessionResponse.json();
+  
+  // Now fetch Safe info from backend
+  const response = await fetch(
+    `${apiUrl}/api/safe/${session.safeAddress}/info?sessionId=${sessionId}`,
+    { credentials: 'include' }
+  );
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch Safe info');
+  }
+  
+  const safeInfo = await response.json();
 
   console.log('[SafeService] Safe info retrieved:', {
-    address,
-    ownersCount: owners.length,
-    owners,
-    threshold,
-    nonce,
+    address: safeInfo.address,
+    ownersCount: safeInfo.owners.length,
+    owners: safeInfo.owners,
+    threshold: safeInfo.threshold,
+    nonce: safeInfo.nonce,
   });
 
   return {
-    address,
-    owners,
-    threshold,
-    nonce,
+    address: safeInfo.address,
+    owners: safeInfo.owners,
+    threshold: safeInfo.threshold,
+    nonce: safeInfo.nonce,
   };
 }
 
 /**
- * Get Safe ETH balance from blockchain
+ * Get Safe ETH balance from backend
  * Note: For total asset value with USD pricing, use getTotalAssetValue()
  */
-export async function getSafeBalance(client: SafeClient): Promise<SafeBalance> {
+export async function getSafeBalance(sessionIdOrClient: string | SafeClient): Promise<SafeBalance> {
   try {
-    console.log('[SafeService] Fetching ETH balance from blockchain...');
+    console.log('[SafeService] Fetching ETH balance from backend...');
     
-    // Get the Safe address
-    const safeAddress = await client.getAddress();
-    console.log('[SafeService] Safe address:', safeAddress);
+    // Get session ID
+    const sessionId = typeof sessionIdOrClient === 'string' 
+      ? sessionIdOrClient 
+      : localStorage.getItem('safe_active_session_id');
     
-    // Get the raw balance from blockchain using SDK method
-    const balance = await (client as any).protocolKit.getBalance();
-    console.log('[SafeService] Raw balance from SDK:', balance.toString(), 'wei');
+    if (!sessionId) {
+      throw new Error('No active session found');
+    }
     
-    // Convert to formatted string (wei to ETH)
-    const ethValue = Number(balance) / 1e18;
-    const formatted = ethValue.toFixed(4);
-    console.log('[SafeService] Formatted balance:', formatted, 'ETH');
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+    
+    // Fetch balances from backend
+    const response = await fetch(`${apiUrl}/api/safe/${sessionId}/balances`, {
+      credentials: 'include'
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch balance');
+    }
+    
+    const balances = await response.json();
+    
+    // Find ETH balance
+    const ethBalance = balances.find((b: any) => b.tokenAddress === null);
+    
+    if (ethBalance) {
+      const ethValue = parseFloat(ethBalance.balance) / 1e18;
+      return {
+        value: BigInt(ethBalance.balance),
+        formatted: ethValue.toFixed(4),
+      };
+    }
     
     return {
-      value: balance,
-      formatted,
+      value: BigInt(0),
+      formatted: '0',
     };
   } catch (error) {
     console.error('[SafeService] Error fetching Safe balance:', error);
@@ -104,18 +151,22 @@ export async function getSafeBalance(client: SafeClient): Promise<SafeBalance> {
  * Get all token balances (including tokens and fiat values)
  * Uses the Safe Transaction Service API via backend
  */
-export async function getAllBalances(client: SafeClient): Promise<TokenBalance[]> {
+export async function getAllBalances(sessionIdOrClient: string | SafeClient): Promise<TokenBalance[]> {
   try {
     console.log('[SafeService] Fetching all token balances...');
     
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-    const sessionId = localStorage.getItem('safe_active_session_id');
+    const sessionId = typeof sessionIdOrClient === 'string' 
+      ? sessionIdOrClient 
+      : localStorage.getItem('safe_active_session_id');
     
     if (!sessionId) {
       throw new Error('No active session');
     }
     
-    const response = await fetch(`${apiUrl}/api/safe/${sessionId}/balances`);
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+    const response = await fetch(`${apiUrl}/api/safe/${sessionId}/balances`, {
+      credentials: 'include'
+    });
     
     if (!response.ok) {
       throw new Error('Failed to fetch balances from API');
@@ -135,20 +186,25 @@ export async function getAllBalances(client: SafeClient): Promise<TokenBalance[]
  * Get total asset value from backend (cached in session for 5 minutes)
  * Backend calculates the value using Safe Transaction Service + CoinGecko prices
  */
-export async function getTotalAssetValue(client: SafeClient, force = false): Promise<{ totalUsd: string; tokens: any[]; cached?: boolean; lastUpdate?: string }> {
+export async function getTotalAssetValue(sessionIdOrClient: string | SafeClient, force = false): Promise<{ totalUsd: string; tokens: any[]; cached?: boolean; lastUpdate?: string }> {
   try {
     console.log('[SafeService] Fetching total asset value from backend...');
     
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-    const sessionId = localStorage.getItem('safe_active_session_id');
+    const sessionId = typeof sessionIdOrClient === 'string' 
+      ? sessionIdOrClient 
+      : localStorage.getItem('safe_active_session_id');
     
     if (!sessionId) {
       throw new Error('No active session');
     }
     
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+    
     // Call backend endpoint which handles caching
     const url = `${apiUrl}/api/safe/${sessionId}/asset-value${force ? '?force=true' : ''}`;
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      credentials: 'include'
+    });
     
     if (!response.ok) {
       throw new Error('Failed to fetch asset value from API');
@@ -174,36 +230,44 @@ export async function getTotalAssetValue(client: SafeClient, force = false): Pro
 /**
  * Check if an address is an owner of the Safe
  */
-export async function isOwner(client: SafeClient, address: string): Promise<boolean> {
-  const owners = await client.getOwners();
-  return owners.some(owner => owner.toLowerCase() === address.toLowerCase());
+export async function isOwner(sessionIdOrClient: string | SafeClient, address: string): Promise<boolean> {
+  const info = await getSafeInfo(sessionIdOrClient);
+  return info.owners.some(owner => owner.toLowerCase() === address.toLowerCase());
 }
 
 /**
  * Get all Safe owners
  */
-export async function getOwners(client: SafeClient): Promise<string[]> {
-  return await client.getOwners();
+export async function getOwners(sessionIdOrClient: string | SafeClient): Promise<string[]> {
+  const info = await getSafeInfo(sessionIdOrClient);
+  return info.owners;
 }
 
 /**
- * Check if the Safe is deployed
+ * Check if the Safe is deployed (always true if we can fetch info)
  */
-export async function isDeployed(client: SafeClient): Promise<boolean> {
-  return await client.isDeployed();
+export async function isDeployed(sessionIdOrClient: string | SafeClient): Promise<boolean> {
+  try {
+    await getSafeInfo(sessionIdOrClient);
+    return true;
+  } catch (error) {
+    return false;
+  }
 }
 
 /**
  * Get Safe threshold
  */
-export async function getThreshold(client: SafeClient): Promise<number> {
-  return await client.getThreshold();
+export async function getThreshold(sessionIdOrClient: string | SafeClient): Promise<number> {
+  const info = await getSafeInfo(sessionIdOrClient);
+  return info.threshold;
 }
 
 /**
  * Get Safe nonce
  */
-export async function getNonce(client: SafeClient): Promise<number> {
-  return await client.getNonce();
+export async function getNonce(sessionIdOrClient: string | SafeClient): Promise<number> {
+  const info = await getSafeInfo(sessionIdOrClient);
+  return info.nonce;
 }
 

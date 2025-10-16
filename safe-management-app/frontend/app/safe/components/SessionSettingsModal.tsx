@@ -23,7 +23,6 @@ interface Session {
   safeAddress: string;
   apiKey: string;
   chainId: number;
-  rpcUrl: string;
   transactionServiceUrl: string;
   isDefault: boolean;
 }
@@ -47,7 +46,6 @@ export function SessionSettingsModal({ trigger, open: controlledOpen, onOpenChan
     name: '',
     safeAddress: '',
     chainId: 1,
-    rpcUrl: '',
     apiKey: '',
     transactionServiceUrl: 'https://safe-transaction-mainnet.safe.global',
     isDefault: false,
@@ -100,7 +98,6 @@ export function SessionSettingsModal({ trigger, open: controlledOpen, onOpenChan
       name: session.name,
       safeAddress: session.safeAddress,
       chainId: session.chainId,
-      rpcUrl: session.rpcUrl,
       apiKey: session.apiKey,
       transactionServiceUrl: session.transactionServiceUrl,
       isDefault: session.isDefault,
@@ -115,7 +112,6 @@ export function SessionSettingsModal({ trigger, open: controlledOpen, onOpenChan
         name: '',
         safeAddress: '',
         chainId: 1,
-        rpcUrl: '',
         apiKey: '',
         transactionServiceUrl: 'https://safe-transaction-mainnet.safe.global',
         isDefault: false,
@@ -305,29 +301,42 @@ export function SessionSettingsModal({ trigger, open: controlledOpen, onOpenChan
           {/* Session Form */}
           <div className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Session Name</label>
+              <label className="text-sm font-medium">
+                Session Name
+                <span className="text-muted-foreground ml-2 font-normal">(Auto-generated)</span>
+              </label>
               <Input
                 placeholder="Auto: {Network}-{Address}"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               />
               <p className="text-xs text-muted-foreground">
-                Leave empty to auto-generate from network and address
+                💡 Leave empty to auto-generate from network and address
               </p>
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Safe Address *</label>
+              <label className="text-sm font-medium">
+                Safe Address
+                <span className="text-red-500 ml-1">*</span>
+              </label>
               <Input
                 placeholder="0x..."
                 value={formData.safeAddress}
                 onChange={(e) => setFormData({ ...formData, safeAddress: e.target.value })}
                 required
+                className="font-mono"
               />
+              <p className="text-xs text-muted-foreground">
+                Your Safe's Ethereum address (42 characters starting with 0x)
+              </p>
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Network *</label>
+              <label className="text-sm font-medium">
+                Network
+                <span className="text-red-500 ml-1">*</span>
+              </label>
               <Select 
                 value={formData.chainId.toString()} 
                 onValueChange={(value) => {
@@ -336,6 +345,12 @@ export function SessionSettingsModal({ trigger, open: controlledOpen, onOpenChan
                     ? 'https://safe-transaction-mainnet.safe.global'
                     : chainId === 11155111
                     ? 'https://safe-transaction-sepolia.safe.global'
+                    : chainId === 137
+                    ? 'https://safe-transaction-polygon.safe.global'
+                    : chainId === 10
+                    ? 'https://safe-transaction-optimism.safe.global'
+                    : chainId === 42161
+                    ? 'https://safe-transaction-arbitrum.safe.global'
                     : 'https://safe-transaction-mainnet.safe.global';
                   
                   setFormData({ 
@@ -349,43 +364,70 @@ export function SessionSettingsModal({ trigger, open: controlledOpen, onOpenChan
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="1">Ethereum Mainnet</SelectItem>
-                  <SelectItem value="11155111">Sepolia Testnet</SelectItem>
-                  <SelectItem value="137">Polygon</SelectItem>
-                  <SelectItem value="10">Optimism</SelectItem>
-                  <SelectItem value="42161">Arbitrum</SelectItem>
+                  <SelectItem value="1">🌐 Ethereum Mainnet</SelectItem>
+                  <SelectItem value="11155111">🧪 Sepolia Testnet</SelectItem>
+                  <SelectItem value="137">🟣 Polygon</SelectItem>
+                  <SelectItem value="10">🔴 Optimism</SelectItem>
+                  <SelectItem value="42161">🔵 Arbitrum One</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                ⚡ RPC URLs are automatically configured for this network
+              </p>
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">RPC URL *</label>
-              <Input
-                placeholder="https://eth-mainnet.g.alchemy.com/v2/..."
-                value={formData.rpcUrl}
-                onChange={(e) => setFormData({ ...formData, rpcUrl: e.target.value })}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Safe API Key</label>
+              <label className="text-sm font-medium">
+                Safe API Key
+                <span className="text-muted-foreground ml-2">(Optional)</span>
+              </label>
               <Input
                 type="password"
-                placeholder="Optional"
+                placeholder="Leave empty to use company key"
                 value={formData.apiKey}
                 onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
               />
+              <p className="text-xs text-muted-foreground">
+                Optional: Provide your own Safe API key. If left empty, a shared company key will be used.
+              </p>
+            </div>
+
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg space-y-2">
+              <p className="text-sm font-semibold text-blue-800 flex items-center gap-2">
+                <span className="text-lg">🎉</span> Simplified Configuration
+              </p>
+              <ul className="text-sm text-blue-700 space-y-1.5 ml-6">
+                <li className="flex items-start gap-2">
+                  <span className="text-green-600 font-bold">✓</span>
+                  <span><strong>RPC URLs:</strong> Automatically configured by network</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-green-600 font-bold">✓</span>
+                  <span><strong>API Key:</strong> Optional - uses company key as fallback</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-green-600 font-bold">✓</span>
+                  <span><strong>Faster setup:</strong> Just select network and Safe address</span>
+                </li>
+              </ul>
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Transaction Service URL *</label>
+              <label className="text-sm font-medium">
+                Transaction Service URL
+                <span className="text-red-500 ml-1">*</span>
+                <span className="text-muted-foreground ml-2 font-normal text-xs">(Auto-filled by network)</span>
+              </label>
               <Input
                 placeholder="https://safe-transaction-mainnet.safe.global"
                 value={formData.transactionServiceUrl}
                 onChange={(e) => setFormData({ ...formData, transactionServiceUrl: e.target.value })}
                 required
+                className="font-mono text-sm"
               />
+              <p className="text-xs text-muted-foreground">
+                Safe's transaction indexing service (automatically set when you select a network)
+              </p>
             </div>
           </div>
 

@@ -36,8 +36,8 @@ export default function SafeDashboard() {
   // Fetch Safe data using services
   useEffect(() => {
     const fetchData = async () => {
-      if (!safeClient) {
-        console.log('[Dashboard] No safeClient available');
+      if (!session) {
+        console.log('[Dashboard] No session available');
         setLoading(false);
         return;
       }
@@ -46,15 +46,15 @@ export default function SafeDashboard() {
         console.log('[Dashboard] Starting to fetch Safe data...');
         setLoading(true);
         
-        // Get Safe info using service
+        // Get Safe info using service (now fetches from backend)
         console.log('[Dashboard] Fetching Safe info...');
-        const info = await safeService.getSafeInfo(safeClient);
+        const info = await safeService.getSafeInfo(session.id);
         console.log('[Dashboard] Safe info received:', info);
         setSafeInfo(info);
         
         // Get total asset value (all tokens combined)
         console.log('[Dashboard] Fetching total asset value...');
-        const assetValue = await safeService.getTotalAssetValue(safeClient);
+        const assetValue = await safeService.getTotalAssetValue(session.id);
         console.log('[Dashboard] Total asset value:', assetValue);
         
         // Find ETH balance from tokens
@@ -66,7 +66,7 @@ export default function SafeDashboard() {
         
         // Get pending transactions using service
         console.log('[Dashboard] Fetching pending transactions...');
-        const pending = await transactionService.getPendingTransactions(safeClient);
+        const pending = await transactionService.getPendingTransactions(session.id);
         console.log('[Dashboard] Pending transactions received:', pending.length, 'transactions');
         setPendingCount(pending.length);
         
@@ -93,7 +93,7 @@ export default function SafeDashboard() {
     };
 
     fetchData();
-  }, [safeClient]);
+  }, [session]);
 
   const copyAddress = async (address: string) => {
     try {

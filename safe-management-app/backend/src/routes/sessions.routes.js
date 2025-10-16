@@ -77,22 +77,21 @@ router.get('/:id', async (req, res) => {
 // Create new session
 router.post('/', async (req, res) => {
   try {
-    const { name, safeAddress, apiKey, chainId, rpcUrl, transactionServiceUrl, isDefault } = req.body;
+    const { name, safeAddress, apiKey, chainId, transactionServiceUrl, isDefault } = req.body;
     
-    // Validate required fields
-    if (!safeAddress || !apiKey || !chainId || !rpcUrl || !transactionServiceUrl) {
+    // Validate required fields (apiKey is now optional, rpcUrl removed)
+    if (!safeAddress || !chainId || !transactionServiceUrl) {
       return res.status(400).json({
         error: 'Missing required fields',
-        required: ['safeAddress', 'apiKey', 'chainId', 'rpcUrl', 'transactionServiceUrl']
+        required: ['safeAddress', 'chainId', 'transactionServiceUrl']
       });
     }
     
     const session = await sessionService.createSession({
       name,
       safeAddress,
-      apiKey,
+      apiKey: apiKey || null, // Make optional
       chainId: parseInt(chainId),
-      rpcUrl,
       transactionServiceUrl,
       isDefault: isDefault || false,
       userId: req.user?.id // For future multi-user support
@@ -110,14 +109,13 @@ router.post('/', async (req, res) => {
 // Update session
 router.put('/:id', async (req, res) => {
   try {
-    const { name, safeAddress, apiKey, chainId, rpcUrl, transactionServiceUrl, isDefault } = req.body;
+    const { name, safeAddress, apiKey, chainId, transactionServiceUrl, isDefault } = req.body;
     
     const session = await sessionService.updateSession(req.params.id, {
       name,
       safeAddress,
-      apiKey,
+      apiKey: apiKey || null, // Make optional
       chainId: chainId ? parseInt(chainId) : undefined,
-      rpcUrl,
       transactionServiceUrl,
       isDefault
     });

@@ -1,4 +1,6 @@
 const axios = require('axios');
+const { getRpcUrl } = require('./rpcProviderService');
+const { getApiKey, getApiKeySource } = require('../utils/apiKeyHelper');
 
 /**
  * Safe Service - Handles interactions with Safe Transaction Service API
@@ -8,9 +10,10 @@ const axios = require('axios');
 class SafeService {
   constructor(config) {
     this.safeAddress = config.safeAddress;
-    this.apiKey = config.apiKey;
     this.chainId = config.chainId;
-    this.rpcUrl = config.rpcUrl;
+    this.rpcUrl = getRpcUrl(config.chainId);  // ✅ Get RPC URL from service
+    this.apiKey = getApiKey(config.apiKey);  // ✅ Use API key helper with fallback
+    this.apiKeySource = getApiKeySource(config.apiKey);
     this.transactionServiceUrl = config.transactionServiceUrl;
     
     // Create axios instance with default config
@@ -21,6 +24,9 @@ class SafeService {
         ...(this.apiKey && { 'Authorization': `Bearer ${this.apiKey}` })
       }
     });
+
+    // Log API key source for debugging
+    console.log(`[SafeService] Initialized with API key from: ${this.apiKeySource}`);
   }
   
   /**
@@ -316,7 +322,7 @@ function createSafeService(session) {
     safeAddress: session.safeAddress,
     apiKey: session.apiKey,
     chainId: session.chainId,
-    rpcUrl: session.rpcUrl,
+    // rpcUrl is now determined automatically from chainId
     transactionServiceUrl: session.transactionServiceUrl
   });
 }

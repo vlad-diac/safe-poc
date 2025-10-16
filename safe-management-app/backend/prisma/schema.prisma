@@ -11,9 +11,8 @@ model SafeSession {
   id                    String   @id @default(uuid())
   name                  String
   safeAddress           String
-  apiKey                String
-  chainId               Int
-  rpcUrl                String
+  apiKey                String?  // Make optional - will use company key as fallback
+  chainId               Int      // RPC URL determined by backend based on chainId
   transactionServiceUrl String
   isDefault             Boolean  @default(false)
   connectedWallet       String?  // Auto-connect this wallet when session loads
@@ -28,6 +27,7 @@ model SafeSession {
   paymentLinks      PaymentLink[]
   transactions      Transaction[]
   transactionSync   TransactionSync?
+  draftTransactions DraftTransaction[]
 }
 
 model PaymentLink {
@@ -105,4 +105,39 @@ model TransactionSync {
   updatedAt    DateTime @updatedAt
   
   session SafeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model DraftTransaction {
+  id              String   @id @default(uuid())
+  sessionId       String
+  safeAddress     String
+  
+  // Transaction Data
+  safeTxHash      String   @unique
+  transactionData String   @db.Text  // JSON: Full transaction object
+  recipients      String   @db.Text  // JSON: Array of recipients
+  
+  // Metadata
+  description     String?
+  category        String?  // 'payment', 'batch', 'token-transfer'
+  
+  // Status Flow
+  status          String   @default("draft")  // draft → proposed → executed
+  
+  // Signature
+  senderAddress   String?
+  senderSignature String?  @db.Text
+  signedAt        DateTime?
+  
+  // Dates
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  expiresAt       DateTime?
+  
+  // Relations
+  session         SafeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  @@index([sessionId])
+  @@index([status])
+  @@index([safeTxHash])
 }

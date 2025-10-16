@@ -17,9 +17,13 @@
   "type": "commonjs",
   "dependencies": {
     "@prisma/client": "^6.17.0",
+    "@safe-global/api-kit": "^4.0.0",
+    "@safe-global/protocol-kit": "^6.1.1",
+    "@safe-global/types-kit": "^3.0.0",
     "axios": "^1.12.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
+    "ethers": "^6.15.0",
     "express": "^5.1.0"
   },
   "devDependencies": {

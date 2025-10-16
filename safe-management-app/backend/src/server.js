@@ -8,12 +8,17 @@ const safeRoutes = require('./routes/safe.routes');
 const paymentLinksRoutes = require('./routes/payment-links.routes');
 const transactionsRoutes = require('./routes/transactions.routes');
 const pricesRoutes = require('./routes/prices.routes');
+const batchTransactionsRoutes = require('./routes/batch-transactions.routes');
+const tokensRoutes = require('./routes/tokens.routes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors({ origin: process.env.FRONTEND_URL }));
+app.use(cors({ 
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true 
+}));
 app.use(express.json());
 
 // Health check
@@ -27,6 +32,8 @@ app.use('/api/safe', safeRoutes);
 app.use('/api/payment-links', paymentLinksRoutes);
 app.use('/api/transactions', transactionsRoutes);
 app.use('/api/prices', pricesRoutes);
+app.use('/api/batch-transactions', batchTransactionsRoutes);
+app.use('/api/tokens', tokensRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -54,6 +61,8 @@ app.listen(PORT, () => {
   console.log(`   - Payment Links: http://localhost:${PORT}/api/payment-links`);
   console.log(`   - Transactions: http://localhost:${PORT}/api/transactions/:sessionId`);
   console.log(`   - Prices: http://localhost:${PORT}/api/prices/*`);
+  console.log(`   - Batch Transactions: http://localhost:${PORT}/api/batch-transactions`);
+  console.log(`   - Tokens: http://localhost:${PORT}/api/tokens`);
 });
 
 module.exports = app;

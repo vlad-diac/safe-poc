@@ -1,9 +1,8 @@
 'use client';
 
 import { createSafeClient, SafeClient } from '@safe-global/sdk-starter-kit';
-import { ReactNode, useEffect, useState, createContext, useContext, useCallback } from 'react';
+import { ReactNode, useEffect, useState, createContext, useContext } from 'react';
 import { toast } from 'sonner';
-import { mainnet, sepolia, goerli, polygon, optimism, arbitrum, Chain } from 'viem/chains';
 
 // Declare window.ethereum for TypeScript
 declare global {
@@ -16,13 +15,9 @@ interface SafeSession {
   id: string;
   name: string;
   safeAddress: string;
-  apiKey: string;
   chainId: number;
-  rpcUrl: string;
   transactionServiceUrl: string;
-  isDefault: boolean;
-  connectedWallet: string | null;
-  autoReconnect: boolean;
+  apiKey?: string;
 }
 
 interface SafeProviderWrapperProps {
@@ -34,25 +29,12 @@ interface SafeContextType {
   safeClient: SafeClient | null;
   session: SafeSession | null;
   connectedWallet: string | null;
-  isConnecting: boolean;
   isOwner: boolean;
   connect: (address: string) => Promise<void>;
   disconnect: () => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   refreshSession: () => Promise<void>;
-  connectWallet: (walletAddress: string, autoReconnect?: boolean) => Promise<void>;
-  disconnectWallet: () => Promise<void>;
 }
-
-// Chain mapping for viem chains
-const CHAIN_MAP: Record<number, Chain> = {
-  1: mainnet,
-  11155111: sepolia,
-  5: goerli,
-  137: polygon,
-  10: optimism,
-  42161: arbitrum,
-};
 
 // Create Safe Context
 const SafeContext = createContext<SafeContextType | null>(null);
@@ -74,253 +56,185 @@ export function useSession() {
   return context;
 }
 
-export function SafeProviderWrapper({ children, sessionId: initialSessionId }: SafeProviderWrapperProps) {
+export function SafeProviderWrapper({ children }: SafeProviderWrapperProps) {
   const [session, setSession] = useState<SafeSession | null>(null);
-  const [loading, setLoading] = useState(true);
   const [safeClient, setSafeClient] = useState<SafeClient | null>(null);
-  const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(initialSessionId);
   const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
-  const [isConnecting, setIsConnecting] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const fetchSession = async (sessionIdToFetch?: string) => {
-    try {
-      setLoading(true);
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-      
-      // Check localStorage for saved session ID if none provided
-      let sessionToLoad = sessionIdToFetch;
-      if (!sessionToLoad && typeof window !== 'undefined') {
-        const savedSessionId = localStorage.getItem('safe_active_session_id');
-        if (savedSessionId) {
-          console.log('📦 Loading saved session from localStorage:', savedSessionId);
-          sessionToLoad = savedSessionId;
-        }
-      }
-      
-      const endpoint = sessionToLoad 
-        ? `${apiUrl}/api/sessions/${sessionToLoad}`
-        : `${apiUrl}/api/sessions/default`;
-      
-      console.log('🔍 Fetching session from:', endpoint);
-      const response = await fetch(endpoint);
-      
-      if (!response.ok) {
-        // If the saved session doesn't exist, try loading the default
-        if (sessionToLoad && typeof window !== 'undefined') {
-          console.warn('⚠️ Saved session not found, falling back to default');
-          localStorage.removeItem('safe_active_session_id');
-          return await fetchSession(); // Retry without session ID (will load default)
-        }
-        throw new Error('Failed to fetch session');
-      }
-      
-      const data = await response.json();
-      setSession(data);
-      
-      // Set connected wallet from session
-      setConnectedWallet(data.connectedWallet || null);
-      
-      // Save the loaded session ID to localStorage
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('safe_active_session_id', data.id);
-        console.log('💾 Saved session to localStorage:', data.id, data.name);
-      }
-
-      // Check if wallet is available
-      const hasWallet = typeof window !== 'undefined' && window.ethereum;
-      
-      console.log('🔧 SDK Starter Kit Configuration:', {
-        providerType: hasWallet ? 'window.ethereum (for signing)' : 'RPC URL (read-only)',
-        rpcUrl: data.rpcUrl,
-        hasWindowEthereum: hasWallet,
-        safeAddress: data.safeAddress,
-        chainId: data.chainId,
-      });
-      
-      // Initialize SafeClient with window.ethereum if available, otherwise RPC URL
-      // When window.ethereum is available, signing will work properly
-      console.log('[SafeProvider] Creating SafeClient with config:', {
-        provider: hasWallet ? 'window.ethereum' : data.rpcUrl,
-        signer: data.connectedWallet || 'undefined',
-        safeAddress: data.safeAddress,
-        apiKey: data.apiKey ? 'provided' : 'not provided',
-        chainId: data.chainId,
-      });
-      
-      const client = await createSafeClient({
-        provider: hasWallet ? window.ethereum : data.rpcUrl,
-        signer: data.connectedWallet || undefined, // Use saved wallet if auto-reconnecting
-        safeAddress: data.safeAddress,
-        apiKey: data.apiKey, // Required for Safe Transaction Service
-      });
-      
-      setSafeClient(client);
-      
-      // Log SafeClient details
-      try {
-        const [address, owners, threshold, nonce] = await Promise.all([
-          client.getAddress(),
-          client.getOwners(),
-          client.getThreshold(),
-          client.getNonce(),
-        ]);
-        
-        console.log('[SafeProvider] ===== SAFE CLIENT INITIALIZED =====');
-        console.log('[SafeProvider] Safe Address:', address);
-        console.log('[SafeProvider] Owners:', owners);
-        console.log('[SafeProvider] Threshold:', threshold);
-        console.log('[SafeProvider] Nonce:', nonce);
-        console.log('[SafeProvider] Provider type:', hasWallet ? 'window.ethereum' : 'RPC URL');
-        console.log('[SafeProvider] Connected Wallet:', data.connectedWallet || 'none');
-        console.log('[SafeProvider] =====================================');
-      } catch (err) {
-        console.error('[SafeProvider] Error fetching Safe details:', err);
-      }
-      
-      console.log('✅ SafeClient initialized');
-
-      return data;
-    } catch (error) {
-      console.error('Failed to load session:', error);
-      toast.error('Failed to load Safe session. Please check your configuration.');
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const switchSession = async (sessionId: string) => {
-    try {
-      setCurrentSessionId(sessionId);
-      await fetchSession(sessionId);
-      toast.success('Switched to new session');
-      // Reload page to ensure clean state with new session
-      window.location.reload();
-    } catch (error) {
-      toast.error('Failed to switch session');
-      throw error;
-    }
-  };
-
-  const refreshSession = async () => {
-    await fetchSession(currentSessionId);
-  };
-
-  const connect = useCallback(async (address: string) => {
+  // Only for signing - backend handles everything else
+  const connect = async (address: string) => {
     if (!session || !window.ethereum) {
       throw new Error('Session or window.ethereum not available');
     }
 
     try {
-      console.log('🔌 Connecting signer to SafeClient:', address);
-      
-      // Create a new SafeClient with the signer
-      const clientWithSigner = await createSafeClient({
+      console.log('🔌 Connecting wallet for signing:', address);
+
+      // Create minimal client just for signing
+      // Backend handles all SDK operations, but we need txServiceUrl for client initialization
+      const client = await createSafeClient({
         provider: window.ethereum,
         signer: address,
         safeAddress: session.safeAddress,
-        apiKey: session.apiKey, // Required for Safe Transaction Service
+        txServiceUrl: session.transactionServiceUrl
       });
-      
-      setSafeClient(clientWithSigner);
-      
-      // Check if the address is an owner
-      const owners = await clientWithSigner.getOwners();
-      const isOwnerAccount = owners.some(owner => owner.toLowerCase() === address.toLowerCase());
-      setIsOwner(isOwnerAccount);
-      
-      console.log('✅ Signer connected to SafeClient:', { address, isOwner: isOwnerAccount });
-    } catch (error) {
-      console.error('Failed to connect signer:', error);
-      throw error;
-    }
-  }, [session]);
 
-  const disconnect = useCallback(async () => {
-    if (!session) return;
-    
-    try {
-      // Reinitialize SafeClient without signer
-      const client = await createSafeClient({
-        provider: window.ethereum || session.rpcUrl,
-        signer: undefined,
-        safeAddress: session.safeAddress,
-        apiKey: session.apiKey, // Required for Safe Transaction Service
-      });
-      
       setSafeClient(client);
-      setIsOwner(false);
-      console.log('🔌 Disconnected signer from SafeClient');
-    } catch (error) {
-      console.error('Failed to disconnect:', error);
-      throw error;
-    }
-  }, [session]);
+      setConnectedWallet(address);
 
-  const connectWallet = async (walletAddress: string, autoReconnect?: boolean) => {
-    if (!session) {
-      throw new Error('No active session');
-    }
-    
-    try {
-      setIsConnecting(true);
+      // Check if owner (fetch from backend)
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      const response = await fetch(
+        `${apiUrl}/api/safe/${session.safeAddress}/info?sessionId=${session.id}`,
+        { credentials: 'include' }
+      );
       
-      // Save wallet address and autoReconnect preference to session
-      const response = await fetch(`${apiUrl}/api/sessions/${session.id}/connected-wallet`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          walletAddress,
-          autoReconnect: autoReconnect !== undefined ? autoReconnect : session.autoReconnect
-        })
-      });
-      
-      if (!response.ok) throw new Error('Failed to save wallet');
-      
-      const updatedSession = await response.json();
-      setSession(updatedSession);
-      setConnectedWallet(walletAddress);
-      console.log('💾 Connected wallet to session:', walletAddress, 'Auto-reconnect:', updatedSession.autoReconnect);
+      if (response.ok) {
+        const safeInfo = await response.json();
+        const isOwnerAccount = safeInfo.owners.some(
+          (owner: string) => owner.toLowerCase() === address.toLowerCase()
+        );
+        setIsOwner(isOwnerAccount);
+      }
+
+      console.log('✅ Wallet connected for signing');
     } catch (error) {
-      console.error('Failed to connect wallet:', error);
+      console.error('Failed to connect:', error);
       throw error;
-    } finally {
-      setIsConnecting(false);
     }
   };
 
-  const disconnectWallet = async () => {
-    if (!session) {
-      throw new Error('No active session');
-    }
-    
+  const disconnect = async () => {
+    setSafeClient(null);
+    setConnectedWallet(null);
+    setIsOwner(false);
+    console.log('🔌 Wallet disconnected');
+  };
+
+  const switchSession = async (sessionId: string) => {
     try {
-      setIsConnecting(true);
+      console.log('🔄 Switching to session:', sessionId);
+      
+      // Store the new session ID
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('safe_active_session_id', sessionId);
+        console.log('💾 Session ID saved to localStorage');
+      }
+      
+      // Reload the page to load the new session
+      console.log('🔃 Reloading page...');
+      window.location.reload();
+    } catch (error) {
+      console.error('Failed to switch session:', error);
+      throw error;
+    }
+  };
+
+  const refreshSession = async () => {
+    try {
+      setLoading(true);
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
       
-      // Clear wallet address from session
-      const response = await fetch(`${apiUrl}/api/sessions/${session.id}/connected-wallet`, {
-        method: 'DELETE'
+      const sessionId = typeof window !== 'undefined' 
+        ? localStorage.getItem('safe_active_session_id')
+        : null;
+        
+      const endpoint = sessionId 
+        ? `${apiUrl}/api/sessions/${sessionId}`
+        : `${apiUrl}/api/sessions/default`;
+      
+      const response = await fetch(endpoint, {
+        credentials: 'include'
       });
       
-      if (!response.ok) throw new Error('Failed to clear wallet');
+      if (!response.ok) {
+        throw new Error(`Failed to fetch session: ${response.statusText}`);
+      }
       
-      const updatedSession = await response.json();
-      setSession(updatedSession);
-      setConnectedWallet(null);
-      console.log('🗑️ Disconnected wallet from session');
+      const data = await response.json();
+      setSession(data);
+      
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('safe_active_session_id', data.id);
+      }
+      
+      setError(null);
     } catch (error) {
-      console.error('Failed to disconnect wallet:', error);
-      throw error;
+      console.error('Failed to refresh session:', error);
+      setError(error instanceof Error ? error.message : 'Failed to refresh session');
     } finally {
-      setIsConnecting(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchSession(currentSessionId);
+    // Load session from backend
+    const loadSession = async () => {
+      try {
+        setLoading(true);
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+        
+        // Check localStorage for saved session ID
+        const savedSessionId = typeof window !== 'undefined' 
+          ? localStorage.getItem('safe_active_session_id')
+          : null;
+        
+        // Use saved session ID if available, otherwise fetch default
+        const endpoint = savedSessionId 
+          ? `${apiUrl}/api/sessions/${savedSessionId}`
+          : `${apiUrl}/api/sessions/default`;
+        
+        console.log('📋 Loading session from:', endpoint);
+        
+        const response = await fetch(endpoint, {
+          credentials: 'include'
+        });
+        
+        if (!response.ok) {
+          // If saved session doesn't exist, fall back to default
+          if (savedSessionId) {
+            console.warn('⚠️ Saved session not found, loading default');
+            localStorage.removeItem('safe_active_session_id');
+            // Retry with default
+            const defaultResponse = await fetch(`${apiUrl}/api/sessions/default`, {
+              credentials: 'include'
+            });
+            if (!defaultResponse.ok) {
+              throw new Error(`Failed to fetch session: ${defaultResponse.statusText}`);
+            }
+            const defaultData = await defaultResponse.json();
+            setSession(defaultData);
+            localStorage.setItem('safe_active_session_id', defaultData.id);
+            setError(null);
+            setLoading(false);
+            return;
+          }
+          throw new Error(`Failed to fetch session: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        setSession(data);
+        
+        console.log('✅ Session loaded:', data.name, `(${data.id})`);
+        
+        // Store session ID in localStorage for service functions
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('safe_active_session_id', data.id);
+        }
+        
+        setError(null);
+      } catch (error) {
+        console.error('Failed to load session:', error);
+        setError(error instanceof Error ? error.message : 'Failed to load session');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadSession();
   }, []);
 
   if (loading) {
@@ -334,7 +248,7 @@ export function SafeProviderWrapper({ children, sessionId: initialSessionId }: S
     );
   }
 
-  if (!session || !safeClient) {
+  if (error || !session) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center max-w-md">
@@ -342,6 +256,9 @@ export function SafeProviderWrapper({ children, sessionId: initialSessionId }: S
           <p className="text-muted-foreground mb-4">
             Unable to load Safe configuration. Please check your backend setup.
           </p>
+          {error && (
+            <p className="text-sm text-red-500 mb-4">Error: {error}</p>
+          )}
           <div className="text-sm text-muted-foreground">
             <p className="font-semibold mb-2">Troubleshooting:</p>
             <ol className="list-decimal list-inside text-left mt-2 space-y-1">
@@ -360,14 +277,11 @@ export function SafeProviderWrapper({ children, sessionId: initialSessionId }: S
     safeClient,
     session,
     connectedWallet,
-    isConnecting,
     isOwner,
     connect,
     disconnect,
     switchSession,
-    refreshSession,
-    connectWallet,
-    disconnectWallet,
+    refreshSession
   };
 
   return (

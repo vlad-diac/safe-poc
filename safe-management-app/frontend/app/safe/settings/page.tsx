@@ -1,48 +1,67 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { 
-  useSafe, 
-  useUpdateOwners, 
-  useUpdateThreshold 
-} from '@safe-global/safe-react-hooks';
+import { useSafe } from '@/app/providers/SafeProvider';
 import { toast } from 'sonner';
 import { 
-  UserPlus, 
-  UserMinus, 
   Shield, 
   Copy, 
   CheckCircle2,
   AlertCircle,
-  Users
+  Users,
+  Info
 } from 'lucide-react';
-import { isAddress } from 'ethers';
+
+interface SafeInfo {
+  address: string;
+  owners: string[];
+  threshold: number;
+  nonce: number;
+  version: string;
+}
 
 export default function SettingsPage() {
-  const { getSafeInfo, isOwnerConnected } = useSafe();
-  const safeInfoQuery = getSafeInfo();
-  const { add, remove } = useUpdateOwners();
-  const { updateThreshold } = useUpdateThreshold();
+  const { session, isOwner } = useSafe();
+  const [safeInfo, setSafeInfo] = useState<SafeInfo | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const [newOwnerAddress, setNewOwnerAddress] = useState('');
-  const [removeOwnerAddress, setRemoveOwnerAddress] = useState('');
-  const [newThreshold, setNewThreshold] = useState('');
+  useEffect(() => {
+    if (session) {
+      loadSafeInfo();
+    }
+  }, [session]);
 
-  const safeInfo = safeInfoQuery.data;
+  const loadSafeInfo = async () => {
+    if (!session) return;
+    
+    try {
+      setLoading(true);
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      const response = await fetch(
+        `${apiUrl}/api/safe/${session.safeAddress}/info?sessionId=${session.id}`,
+        { credentials: 'include' }
+      );
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch Safe info');
+      }
+      
+      const data = await response.json();
+      setSafeInfo(data);
+    } catch (error) {
+      console.error('Failed to load Safe info:', error);
+      toast.error('Failed to load Safe information');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const owners = safeInfo?.owners || [];
   const threshold = safeInfo?.threshold || 1;
-  const isOwner = isOwnerConnected;
-
-  // Add owner mutation
-  const addOwnerMutation = add;
-
-  // Remove owner mutation
-  const removeOwnerMutation = remove;
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -53,103 +72,7 @@ export default function SettingsPage() {
     }
   };
 
-  const truncateAddress = (address: string) => {
-    if (!address) return '';
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
-  };
-
-  const handleAddOwner = async () => {
-    if (!isAddress(newOwnerAddress)) {
-      toast.error('Invalid Ethereum address');
-      return;
-    }
-
-    if (owners.some((owner: string) => owner.toLowerCase() === newOwnerAddress.toLowerCase())) {
-      toast.error('Address is already an owner');
-      return;
-    }
-
-    try {
-      await addOwnerMutation.addOwner({
-        ownerAddress: newOwnerAddress,
-        // Optionally increase threshold when adding an owner
-        // threshold: threshold + 1
-      });
-      
-      toast.success('Owner added successfully!');
-      setNewOwnerAddress('');
-      safeInfoQuery.refetch();
-    } catch (error: any) {
-      console.error('Add owner error:', error);
-      toast.error(error?.message || 'Failed to add owner');
-    }
-  };
-
-  const handleRemoveOwner = async () => {
-    if (!isAddress(removeOwnerAddress)) {
-      toast.error('Invalid Ethereum address');
-      return;
-    }
-
-    if (!owners.some((owner: string) => owner.toLowerCase() === removeOwnerAddress.toLowerCase())) {
-      toast.error('Address is not an owner');
-      return;
-    }
-
-    if (owners.length === 1) {
-      toast.error('Cannot remove the last owner');
-      return;
-    }
-
-    try {
-      await removeOwnerMutation.removeOwner({
-        ownerAddress: removeOwnerAddress,
-        // Automatically decrease threshold if needed
-        threshold: Math.min(threshold, owners.length - 1)
-      });
-      
-      toast.success('Owner removed successfully!');
-      setRemoveOwnerAddress('');
-      safeInfoQuery.refetch();
-    } catch (error: any) {
-      console.error('Remove owner error:', error);
-      toast.error(error?.message || 'Failed to remove owner');
-    }
-  };
-
-  const handleUpdateThreshold = async () => {
-    const newThresholdNum = parseInt(newThreshold);
-    
-    if (isNaN(newThresholdNum) || newThresholdNum < 1) {
-      toast.error('Threshold must be at least 1');
-      return;
-    }
-
-    if (newThresholdNum > owners.length) {
-      toast.error(`Threshold cannot exceed number of owners (${owners.length})`);
-      return;
-    }
-
-    if (newThresholdNum === threshold) {
-      toast.error('New threshold is the same as current threshold');
-      return;
-    }
-
-    try {
-      await updateThreshold({
-        threshold: newThresholdNum
-      });
-      
-      toast.success('Threshold updated successfully!');
-      setNewThreshold('');
-      safeInfoQuery.refetch();
-    } catch (error: any) {
-      console.error('Update threshold error:', error);
-      toast.error(error?.message || 'Failed to update threshold');
-    }
-  };
-
-  if (safeInfoQuery.isLoading) {
+  if (loading) {
     return (
       <div className="space-y-6">
         <h1 className="text-3xl font-bold">Safe Settings</h1>
@@ -162,27 +85,69 @@ export default function SettingsPage() {
     );
   }
 
-  if (!isOwner) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-3xl font-bold">Safe Settings</h1>
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            You must be a Safe owner to manage settings.
-          </AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold">Safe Settings</h1>
-        <p className="text-muted-foreground">Manage owners and security settings</p>
+        <p className="text-muted-foreground">View Safe configuration and security settings</p>
       </div>
+
+      {/* Safe Address */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Shield className="h-5 w-5" />
+            Safe Information
+          </CardTitle>
+          <CardDescription>
+            Your Safe wallet configuration
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Safe Address</span>
+              <div className="flex items-center gap-2">
+                <code className="text-sm bg-muted px-2 py-1 rounded">
+                  {session?.safeAddress}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => session?.safeAddress && copyToClipboard(session.safeAddress)}
+                  className="h-8 w-8 p-0"
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Network</span>
+              <Badge variant="outline">
+                {session?.chainId === 11155111 ? 'Sepolia' : 
+                 session?.chainId === 1 ? 'Ethereum Mainnet' : 
+                 `Chain ID: ${session?.chainId}`}
+              </Badge>
+            </div>
+            
+            {safeInfo?.version && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Safe Version</span>
+                <Badge variant="secondary">{safeInfo.version}</Badge>
+              </div>
+            )}
+            
+            {safeInfo?.nonce !== undefined && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Transaction Nonce</span>
+                <Badge variant="outline">{safeInfo.nonce}</Badge>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Threshold Info */}
       <Card>
@@ -208,30 +173,23 @@ export default function SettingsPage() {
 
           {threshold === 1 && owners.length === 1 && (
             <Alert>
-              <AlertCircle className="h-4 w-4" />
+              <Info className="h-4 w-4" />
               <AlertDescription>
-                Your Safe has only 1 owner. Add more owners and increase the threshold for multi-signature security.
+                Your Safe has only 1 owner with a single signature threshold. 
+                This means transactions can be executed immediately without additional approvals.
               </AlertDescription>
             </Alert>
           )}
-
-          <div className="flex gap-2">
-            <Input
-              type="number"
-              placeholder="New threshold"
-              value={newThreshold}
-              onChange={(e) => setNewThreshold(e.target.value)}
-              min="1"
-              max={owners.length}
-              className="max-w-[200px]"
-            />
-            <Button
-              onClick={handleUpdateThreshold}
-              disabled={updateThreshold.isPending || !newThreshold}
-            >
-              {updateThreshold.isPending ? 'Updating...' : 'Update Threshold'}
-            </Button>
-          </div>
+          
+          {threshold > 1 && (
+            <Alert>
+              <Shield className="h-4 w-4" />
+              <AlertDescription>
+                This Safe requires {threshold} signature(s) to execute transactions, 
+                providing enhanced security through multi-signature approval.
+              </AlertDescription>
+            </Alert>
+          )}
         </CardContent>
       </Card>
 
@@ -272,85 +230,16 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Add Owner */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <UserPlus className="h-5 w-5" />
-            Add New Owner
-          </CardTitle>
-          <CardDescription>
-            Add a new address that can sign transactions
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Alert>
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              Since your threshold is {threshold}, the add owner transaction will be{' '}
-              {threshold === 1 ? 'executed immediately' : `executed after ${threshold} signatures`}.
-            </AlertDescription>
-          </Alert>
-
-          <div className="flex gap-2">
-            <Input
-              placeholder="0x... (New owner address)"
-              value={newOwnerAddress}
-              onChange={(e) => setNewOwnerAddress(e.target.value)}
-            />
-            <Button
-              onClick={handleAddOwner}
-              disabled={addOwnerMutation.isPending || !newOwnerAddress}
-            >
-              <UserPlus className="mr-2 h-4 w-4" />
-              {addOwnerMutation.isPending ? 'Adding...' : 'Add Owner'}
-            </Button>
-          </div>
-
-          <p className="text-sm text-muted-foreground">
-            💡 Tip: After adding owners, consider increasing the threshold for better security.
-          </p>
-        </CardContent>
-      </Card>
-
-      {/* Remove Owner */}
-      {owners.length > 1 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <UserMinus className="h-5 w-5" />
-              Remove Owner
-            </CardTitle>
-            <CardDescription>
-              Remove an existing owner from the Safe
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                Removing an owner is permanent. Make sure the address is correct.
-              </AlertDescription>
-            </Alert>
-
-            <div className="flex gap-2">
-              <Input
-                placeholder="0x... (Owner address to remove)"
-                value={removeOwnerAddress}
-                onChange={(e) => setRemoveOwnerAddress(e.target.value)}
-              />
-              <Button
-                onClick={handleRemoveOwner}
-                variant="destructive"
-                disabled={removeOwnerMutation.isPending || !removeOwnerAddress}
-              >
-                <UserMinus className="mr-2 h-4 w-4" />
-                {removeOwnerMutation.isPending ? 'Removing...' : 'Remove Owner'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* Coming Soon - Owner Management */}
+      <Alert>
+        <Info className="h-4 w-4" />
+        <AlertDescription>
+          <strong>Owner Management Coming Soon</strong>
+          <br />
+          Features to add/remove owners and update the signature threshold will be available in a future update.
+          For now, you can manage owners through the official Safe web interface at app.safe.global.
+        </AlertDescription>
+      </Alert>
     </div>
   );
 }
