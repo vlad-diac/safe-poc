@@ -20,7 +20,7 @@ export default function SafeLayout({
         <Sidebar onSettingsClick={() => setSettingsOpen(true)} />
 
         {/* Main Content */}
-        <div className="flex flex-col flex-1 md:ml-64">
+        <div className="flex flex-col flex-1 md:ml-60">
           <Header />
           
           <main className="flex-1 overflow-y-auto p-6">
